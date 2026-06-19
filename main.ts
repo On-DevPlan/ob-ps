@@ -46,7 +46,7 @@ class LocalRunnerSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    new Setting(containerEl).setName("Local runner 设置").setHeading();
+    new Setting(containerEl).setName("设置").setHeading();
 
     new Setting(containerEl)
       .setName("删除前确认")
@@ -141,7 +141,7 @@ export default class LocalRunnerPlugin extends Plugin {
 
   /** 打开插件设置页 */
   async openSettings(): Promise<void> {
-    const app = this.app as AppWithSetting;
+    const app = this.app as unknown as AppWithSetting;
     await app.setting.open();
     app.setting.openTabById(this.manifest.id);
   }

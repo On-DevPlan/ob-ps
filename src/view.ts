@@ -158,7 +158,7 @@ export class RunnerView extends ItemView {
 
   /** 打开 Obsidian 设置 → Local Runner 标签页 */
   private async openSettings(): Promise<void> {
-    const app = this.app as { setting: { open(): Promise<void>; openTabById(id: string): void } };
+    const app = this.app as unknown as { setting: { open(): Promise<void>; openTabById(id: string): void } };
     await app.setting.open();
     app.setting.openTabById("local-runner");
   }
@@ -535,5 +535,25 @@ export class RunnerView extends ItemView {
     if (tab.status === "running") return "运行中";
     if (tab.status === "stopped") return "已停止";
     return `已退出 (${tab.exitCode ?? "?"})`;
+  }
+}
+
+/** 确认弹窗,替代已弃用的浏览器全局 confirm() */
+class ConfirmModal extends Modal {
+  constructor(
+    app: import("obsidian").App,
+    message: string,
+    private onConfirm: () => void,
+  ) {
+    super(app);
+    this.contentEl.createEl("p", { text: message });
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText("取消").onClick(() => this.close()))
+      .addButton((b) =>
+        b.setButtonText("确认").setCta().onClick(() => {
+          this.onConfirm();
+          this.close();
+        }),
+      );
   }
 }
