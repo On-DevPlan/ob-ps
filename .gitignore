@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Build artifacts (intentionally not tracked; build script copies to the vault)
+main.js
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*

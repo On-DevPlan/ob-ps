@@ -1,0 +1,147 @@
+/* Full-bleed console: drop the default view-content padding for this view. */
+.workspace-leaf-content[data-type="local-runner-view"] .view-content {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.runner-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---- Toolbar (tabs + add button) ---- */
+.runner-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.runner-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  scrollbar-width: thin;
+}
+.runner-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+
+.runner-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--interactive-normal);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  user-select: none;
+}
+.runner-tab:hover {
+  background: var(--interactive-hover);
+  border-color: var(--background-modifier-border);
+}
+.runner-tab.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.runner-tab-label {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.runner-tab-close {
+  opacity: 0.5;
+  font-size: 14px;
+  line-height: 1;
+}
+.runner-tab-close:hover {
+  opacity: 1;
+}
+
+.runner-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--text-faint);
+}
+.runner-tab.is-running .runner-tab-dot {
+  background: #4caf50;
+}
+.runner-tab.is-stopped .runner-tab-dot {
+  background: var(--text-faint);
+}
+.runner-tab.is-exited .runner-tab-dot {
+  background: var(--text-muted);
+}
+
+.runner-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.runner-tab-add:hover {
+  background: var(--interactive-hover);
+  color: var(--text-normal);
+}
+
+/* ---- Controls row ---- */
+.runner-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+/* Settings-generated rows: flatten so buttons sit in a tight row. */
+.runner-controls .setting-item {
+  border: none;
+  padding: 0;
+  flex: 1 0 auto;
+}
+.runner-controls .setting-item-control {
+  gap: 6px;
+}
+
+/* ---- Output pane ---- */
+.runner-output {
+  flex: 1;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+  scrollbar-width: thin;
+}
+
+.runner-empty {
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  text-align: center;
+  padding: 24px;
+}
