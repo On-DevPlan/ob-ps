@@ -14,12 +14,12 @@ jobs:
             id-token: write          # 构建来源证明(attestation)所需
             attestations: write
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v4
 
             - name: Use Node.js
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@v4
               with:
-                  node-version: 24
+                  node-version: 22
                   cache: 'npm'       # 缓存 npm,加速后续安装
 
             - name: Build plugin      # 类型检查 + 生产打包
@@ -33,7 +33,7 @@ jobs:
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
             - name: Attest build provenance     # 为产物签发来源证明(SLSA)
-              uses: actions/attest@v4
+              uses: actions/attest-build-provenance@v1
               with:
                   subject-path: |
                       main.js
