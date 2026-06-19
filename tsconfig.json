@@ -1,32 +1,31 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
-    "inlineSourceMap": true,
-    "inlineSources": true,
-    "module": "ESNext",
-    "target": "ES2018",
-    "allowJs": true,
-    "noImplicitAny": true,
-    "moduleResolution": "node",
-    "importHelpers": true,
-    "isolatedModules": true,
-    "strictNullChecks": true,
-    "strict": true,
-    "lib": [
+    "inlineSourceMap": true,        // 内联 sourcemap,便于调试定位
+    "inlineSources": true,          // 将原始源码一并内联进 sourcemap
+    "module": "ESNext",             // 源码使用 ES 模块语法(esbuild 再转 cjs)
+    "target": "ES2018",             // 编译目标语法版本
+    "allowJs": true,                // 允许混入 JS 文件
+    "noImplicitAny": true,          // 禁止隐式 any
+    "moduleResolution": "bundler",  // 由 esbuild 打包,采用 bundler 解析策略(替代 TS 7.0 将停用的 node)
+    "importHelpers": true,          // 从 tslib 复用辅助函数,减小体积
+    "isolatedModules": true,        // 每个文件可独立编译(esbuild 前置约束)
+    "strictNullChecks": true,       // 严格空值检查
+    "strict": true,                 // 开启全部严格类型检查
+    "lib": [                        // 可用的类型库
       "DOM",
       "ES5",
       "ES6",
       "ES7",
       "ES2018"
     ],
-    "types": [
+    "types": [                      // 仅引入 node 类型(@types/node)
       "node"
     ]
   },
-  "include": [
+  "include": [                      // 纳入编译的文件
     "**/*.ts"
   ],
-  "exclude": [
+  "exclude": [                      // 排除项
     "node_modules",
     ".obsidian"
   ]

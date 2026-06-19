@@ -1,5 +1,6 @@
 name: Release Obsidian plugin
 
+# 触发条件:推送任意 tag 时发布
 on:
     push:
         tags:
@@ -9,8 +10,8 @@ jobs:
     build:
         runs-on: ubuntu-latest
         permissions:
-            contents: write
-            id-token: write
+            contents: write          # 创建 release / 上传资产
+            id-token: write          # 构建来源证明(attestation)所需
             attestations: write
         steps:
             - uses: actions/checkout@v6
@@ -19,26 +20,26 @@ jobs:
               uses: actions/setup-node@v6
               with:
                   node-version: 24
-                  cache: 'npm'
+                  cache: 'npm'       # 缓存 npm,加速后续安装
 
-            - name: Build plugin
+            - name: Build plugin      # 类型检查 + 生产打包
               run: |
                   npm ci
                   npm run build
 
-            - name: Check for optional styles
+            - name: Check for optional styles  # styles.css 可选,需探测是否存在
               id: styles
               run: |
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
-            - name: Attest build provenance
+            - name: Attest build provenance     # 为产物签发来源证明(SLSA)
               uses: actions/attest@v4
               with:
                   subject-path: |
                       main.js
                       ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
 
-            - name: Create release
+            - name: Create release               # CI 通过即直接发布,无需人工确认
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
@@ -46,5 +47,4 @@ jobs:
 
                   gh release create "$tag" \
                     --title="$tag" \
-                    --draft \
                     main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}

@@ -1,16 +1,17 @@
 import { ChildProcess, spawn } from "child_process";
 
 /**
- * Process lifecycle status for a single runner tab.
- * - running: child process is alive
- * - exited: process ended on its own (exit code recorded)
- * - stopped: user terminated the process
+ * 单个标签页的进程生命周期状态。
+ * - running:子进程存活
+ * - exited:进程自行结束(已记录退出码)
+ * - stopped:用户手动终止
  */
 export type RunnerStatus = "running" | "exited" | "stopped";
 
 /**
- * A single command tab. The view owns an array of these; runner helpers
- * mutate the fields and notify the view via the supplied callback.
+ * 单条命令标签页的数据模型。
+ * 视图持有一组 RunnerTab;runner 工具函数负责变更字段,
+ * 并通过传入的回调通知视图刷新。
  */
 export interface RunnerTab {
   id: string;
@@ -18,18 +19,18 @@ export interface RunnerTab {
   cwd: string;
   status: RunnerStatus;
   exitCode: number | null;
-  /** Plain-text output buffer. Capped to MAX_OUTPUT_CHARS. */
+  /** 纯文本输出缓冲;超过 MAX_OUTPUT_CHARS 时从头部裁剪 */
   output: string;
-  /** The live child process, or null when not running. */
+  /** 正在运行的子进程;未运行时为 null */
   child: ChildProcess | null;
 }
 
-/** Cap the in-memory output buffer so long-running servers do not leak memory. */
+/** 输出缓冲上限,防止长时间运行的服务(如 dev server)持续占用内存 */
 const MAX_OUTPUT_CHARS = 200_000;
 
 let idCounter = 0;
 
-/** Create a fresh, not-yet-started tab. */
+/** 创建一个尚未启动的新标签页 */
 export function createTab(command: string, cwd: string): RunnerTab {
   idCounter += 1;
   return {
@@ -43,7 +44,7 @@ export function createTab(command: string, cwd: string): RunnerTab {
   };
 }
 
-/** Append a chunk to the tab buffer, trimming from the front if it overflows. */
+/** 追加输出到缓冲;超限时从头部裁剪,只保留最近的内容 */
 export function appendOutput(tab: RunnerTab, chunk: string): void {
   tab.output += chunk;
   if (tab.output.length > MAX_OUTPUT_CHARS) {
@@ -56,10 +57,10 @@ export function isRunning(tab: RunnerTab): boolean {
 }
 
 /**
- * Spawn the tab's command. No-op if already running.
+ * 启动标签页对应的命令。若已在运行则直接返回(幂等)。
  *
- * Uses `shell: true` so Windows `.cmd` shims (npm/npx) resolve correctly,
- * and so the user may type an arbitrary shell command (pipes, args, etc.).
+ * 使用 `shell: true`:一是让 Windows 上的 .cmd 垫片(npm/npx)正常解析,
+ * 二是允许用户输入任意 shell 命令(管道、参数等)。
  */
 export function startProcess(tab: RunnerTab, onChange: () => void): void {
   if (tab.child) {
@@ -88,6 +89,7 @@ export function startProcess(tab: RunnerTab, onChange: () => void): void {
   tab.child = child;
   appendOutput(tab, `$ ${tab.command}  (cwd: ${tab.cwd})\n`);
 
+  // stdout / stderr 统一写入同一缓冲,简化展示
   child.stdout?.on("data", (data: Buffer) => {
     appendOutput(tab, data.toString());
     onChange();
@@ -113,9 +115,9 @@ export function startProcess(tab: RunnerTab, onChange: () => void): void {
 }
 
 /**
- * Terminate the tab's process. On Windows, kill the whole tree via taskkill
- * (a bare child.kill() only stops cmd.exe and leaves the dev server alive,
- * holding the port). Elsewhere, fall back to SIGTERM.
+ * 终止标签页进程。Windows 下通过 taskkill 杀掉整棵进程树——
+ * 直接 child.kill() 只会结束 cmd.exe,残留的 dev server 仍占用端口;
+ * 其他平台退化为 SIGTERM。
  */
 export function stopProcess(tab: RunnerTab, onChange: () => void): void {
   const child = tab.child;

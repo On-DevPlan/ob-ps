@@ -10,22 +10,22 @@ import {
 export const RUNNER_VIEW_TYPE = "local-runner-view";
 
 /**
- * Right-sidebar console view. Holds a set of process tabs, each running one
- * shell command and streaming its output into a shared output pane.
+ * 右侧栏控制台视图。维护一组进程标签页,
+ * 每个标签页运行一条 shell 命令,并将输出汇聚到共享输出区。
  */
 export class RunnerView extends ItemView {
   private tabs: RunnerTab[] = [];
   private activeId: string | null = null;
 
-  // DOM caches (assigned in onOpen, used only after that).
+  // DOM 缓存(在 onOpen 中赋值,此后只读使用)
   private rootEl!: HTMLElement;
   private tabBarEl!: HTMLElement;
   private controlsEl!: HTMLElement;
   private outputEl!: HTMLElement;
 
-  // Coalesce rapid stdout chunks into a single paint per animation frame.
+  // 将密集的 stdout 分块合并为「每帧一次」的重绘,避免高频刷新卡顿
   private rafScheduled = false;
-  // Follow output to the bottom unless the user has scrolled up.
+  // 仅当用户未向上滚动时,自动跟随到输出底部
   private stickToBottom = true;
 
   getViewType(): string {
@@ -46,7 +46,7 @@ export class RunnerView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // Kill every running process so no orphaned dev servers linger.
+    // 视图关闭时杀掉所有仍在运行的进程,避免遗留孤儿 dev server
     for (const tab of this.tabs) {
       if (tab.child) {
         stopProcess(tab, () => {});
@@ -54,7 +54,7 @@ export class RunnerView extends ItemView {
     }
   }
 
-  // ---- UI scaffolding -----------------------------------------------------
+  // ---- UI 骨架 -----------------------------------------------------------
 
   private buildUi(): void {
     const root = this.contentEl.createDiv({ cls: "runner-view" });
@@ -63,6 +63,7 @@ export class RunnerView extends ItemView {
     const toolbar = root.createDiv({ cls: "runner-toolbar" });
     this.tabBarEl = toolbar.createDiv({ cls: "runner-tabs" });
 
+    // 「+」按钮:打开新建进程弹窗
     const addBtn = toolbar.createDiv({ cls: "runner-tab-add", title: "新建进程" });
     setIcon(addBtn, "plus");
     addBtn.addEventListener("click", () => this.openNewTabModal());
@@ -70,6 +71,7 @@ export class RunnerView extends ItemView {
     this.controlsEl = root.createDiv({ cls: "runner-controls" });
 
     this.outputEl = root.createEl("pre", { cls: "runner-output" });
+    // 监听滚动:靠近底部时恢复自动跟随,远离时停止跟随
     this.outputEl.addEventListener("scroll", () => {
       const nearBottom =
         this.outputEl.scrollHeight - this.outputEl.scrollTop - this.outputEl.clientHeight < 30;
@@ -81,6 +83,7 @@ export class RunnerView extends ItemView {
     this.controlsEl.empty();
     const tab = this.getActiveTab();
 
+    // 运行中显示「重启」,否则显示「运行」
     const runLabel = tab && isRunning(tab) ? "重启" : "运行";
     new Setting(this.controlsEl)
       .addButton((b) =>
@@ -110,8 +113,9 @@ export class RunnerView extends ItemView {
       );
   }
 
-  // ---- Rendering ----------------------------------------------------------
+  // ---- 渲染 --------------------------------------------------------------
 
+  /** 用 requestAnimationFrame 合并高频变更,每帧最多重绘一次 */
   private scheduleRender(): void {
     if (this.rafScheduled) {
       return;
@@ -136,6 +140,7 @@ export class RunnerView extends ItemView {
         ],
       });
 
+      // 状态圆点:title 提示当前状态及点击动作
       const dot = item.createSpan({ cls: "runner-tab-dot" });
       dot.setAttr("title", tabTitleSuffix(tab));
 
@@ -145,6 +150,7 @@ export class RunnerView extends ItemView {
       const close = item.createSpan({ cls: "runner-tab-close", text: "×" });
       close.setAttr("title", "关闭");
 
+      // 点击标签主体切换激活;点击「×」关闭
       item.addEventListener("click", (e) => {
         if ((e.target as HTMLElement).classList.contains("runner-tab-close")) {
           this.closeTab(tab.id);
@@ -153,6 +159,7 @@ export class RunnerView extends ItemView {
         }
       });
 
+      // 点击状态圆点:运行中则停止,已停止/退出则(重新)启动
       dot.addEventListener("click", (e) => {
         e.stopPropagation();
         if (isRunning(tab)) {
@@ -181,7 +188,7 @@ export class RunnerView extends ItemView {
     }
   }
 
-  // ---- Tab actions --------------------------------------------------------
+  // ---- 标签页操作 ---------------------------------------------------------
 
   private getActiveTab(): RunnerTab | null {
     return this.tabs.find((t) => t.id === this.activeId) ?? null;
@@ -193,6 +200,7 @@ export class RunnerView extends ItemView {
     this.scheduleRender();
   }
 
+  /** 运行或重启:运行中先停止再启动,否则直接启动 */
   private runOrRestart(tab: RunnerTab | null): void {
     if (!tab) {
       return;
@@ -215,6 +223,7 @@ export class RunnerView extends ItemView {
     }
     this.tabs.splice(idx, 1);
 
+    // 关闭的是当前激活项时,自动选中相邻标签页
     if (this.activeId === id) {
       const next = this.tabs[idx] ?? this.tabs[idx - 1] ?? null;
       this.activeId = next ? next.id : null;
@@ -223,10 +232,11 @@ export class RunnerView extends ItemView {
     this.scheduleRender();
   }
 
-  // ---- New process modal --------------------------------------------------
+  // ---- 新建进程弹窗 -------------------------------------------------------
 
   private openNewTabModal(): void {
     const adapter = this.app.vault.adapter;
+    // 默认工作目录取当前 vault 根路径(仅文件系统适配器可用)
     const defaultCwd =
       adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
     new NewCommandModal(this.app, defaultCwd, (command, cwd) => {
@@ -240,13 +250,14 @@ export class RunnerView extends ItemView {
   }
 }
 
+/** 根据状态生成状态圆点的 title 文案(含点击动作提示) */
 function tabTitleSuffix(tab: RunnerTab): string {
   if (tab.status === "running") return "运行中(点击停止)";
   if (tab.status === "stopped") return "已停止(点击运行)";
   return `已退出 · 代码 ${tab.exitCode}(点击运行)`;
 }
 
-/** Modal that collects a command and working directory for a new process. */
+/** 新建进程弹窗:收集命令与工作目录 */
 class NewCommandModal extends Modal {
   private command = "";
   private cwd: string;
@@ -273,6 +284,7 @@ class NewCommandModal extends Modal {
     cmdSetting.addText((t) => {
       t.setPlaceholder("npm run dev").onChange((v) => (this.command = v));
       t.inputEl.focus();
+      // 回车即提交
       t.inputEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           this.submit();
