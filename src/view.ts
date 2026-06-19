@@ -1,4 +1,4 @@
-import { ItemView, Modal, Notice, Setting, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import {
   createTab,
   isRunning,
@@ -37,8 +37,15 @@ export class RunnerView extends ItemView {
   /** 待应用的配置(onOpen 前收到时暂存) */
   private pendingConfigs: ProcessConfig[] | null = null;
 
+  // ---- 内联表单状态 ----
+  /** null = 无表单; 'add' / 'edit' = 当前激活的表单模式 */
+  private formMode: 'add' | 'edit' | null = null;
+  /** edit 模式时,正在编辑的标签页 ID */
+  private editingTabId: string | null = null;
+
   // DOM 缓存
   private listEl!: HTMLElement;
+  private formEl!: HTMLElement;
   private readonly outputElMap = new Map<string, HTMLElement>();
 
   getViewType(): string {
@@ -107,7 +114,10 @@ export class RunnerView extends ItemView {
     header.createSpan({ cls: "runner-header-title", text: "本地进程管理" });
     const addBtn = header.createDiv({ cls: "runner-add-btn", title: "新建进程" });
     setIcon(addBtn, "plus");
-    addBtn.addEventListener("click", () => this.openProcessModal());
+    addBtn.addEventListener("click", () => this.showAddForm());
+
+    // 内联表单容器(在列表之前)
+    this.formEl = root.createDiv({ cls: "runner-form-container" });
 
     // 进程列表
     this.listEl = root.createDiv({ cls: "runner-list" });
@@ -139,7 +149,7 @@ export class RunnerView extends ItemView {
     this.listEl.empty();
     this.outputElMap.clear();
 
-    if (this.tabs.length === 0) {
+    if (this.tabs.length === 0 && !this.formMode) {
       this.listEl.createDiv({
         cls: "runner-empty",
         text: "暂无进程,点击 ＋ 添加",
@@ -148,6 +158,8 @@ export class RunnerView extends ItemView {
     }
 
     for (const tab of this.tabs) {
+      // edit 模式下,被编辑的标签页由表单占据,列表中跳过
+      if (this.formMode === "edit" && tab.id === this.editingTabId) continue;
       this.renderItem(tab);
     }
   }
@@ -184,7 +196,7 @@ export class RunnerView extends ItemView {
     editBtn.setAttr("title", "编辑");
     editBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      this.openEditModal(tab);
+      this.showEditForm(tab);
     });
 
     // 删除
@@ -283,6 +295,11 @@ export class RunnerView extends ItemView {
     const idx = this.tabs.findIndex((t) => t.id === id);
     if (idx === -1) return;
 
+    // 如果正在编辑,先关闭表单
+    if (this.formMode === "edit" && this.editingTabId === id) {
+      this.clearForm();
+    }
+
     const tab = this.tabs[idx];
     if (tab.child) {
       stopProcess(tab, () => {});
@@ -295,36 +312,157 @@ export class RunnerView extends ItemView {
     this.renderAll();
   }
 
-  // ---- 弹窗 ----------------------------------------------------------------
+  // ---- 内联表单(替换弹窗) -------------------------------------------------------
 
-  private openProcessModal(): void {
-    new ProcessModal(this.app, this.opts.defaultCwd, (cfg) => {
-      const tab = createTab(cfg.name, cfg.command, cfg.cwd);
+  /** 打开新建表单 */
+  private showAddForm(): void {
+    if (this.formMode) return;
+    this.formMode = "add";
+    this.editingTabId = null;
+    this.renderForm();
+  }
+
+  /** 打开编辑表单 */
+  private showEditForm(tab: RunnerTab): void {
+    if (this.formMode) return;
+    this.formMode = "edit";
+    this.editingTabId = tab.id;
+    this.renderForm();
+    this.renderAll();
+  }
+
+  /** 关闭表单,回到正常列表视图 */
+  private clearForm(): void {
+    this.formMode = null;
+    this.editingTabId = null;
+    this.formEl.empty();
+    this.renderAll();
+  }
+
+  /** 渲染内联表单 */
+  private renderForm(): void {
+    this.formEl.empty();
+    const isEdit = this.formMode === "edit";
+
+    const prefill: { name: string; command: string; cwd: string } = {
+      name: "",
+      command: "",
+      cwd: this.opts.defaultCwd,
+    };
+    if (isEdit && this.editingTabId) {
+      const tab = this.tabs.find((t) => t.id === this.editingTabId);
+      if (tab) {
+        prefill.name = tab.name;
+        prefill.command = tab.command;
+        prefill.cwd = tab.cwd;
+      }
+    }
+
+    const panel = this.formEl.createDiv({ cls: `runner-form-panel is-${this.formMode}` });
+
+    // 标题
+    const header = panel.createDiv({ cls: "runner-form-header" });
+    header.createSpan({ cls: "runner-form-title", text: isEdit ? "编辑进程" : "新建进程" });
+
+    // 表单字段
+    const fields = panel.createDiv({ cls: "runner-form-fields" });
+
+    // 名称
+    const nameFd = fields.createDiv({ cls: "runner-form-field" });
+    nameFd.createDiv({ cls: "runner-form-label", text: "名称" });
+    const nameInput = nameFd.createEl("input", {
+      cls: "runner-form-input",
+      attr: { placeholder: "显示名称", spellcheck: "false" },
+    });
+    nameInput.value = prefill.name;
+
+    // 命令
+    const cmdFd = fields.createDiv({ cls: "runner-form-field" });
+    cmdFd.createDiv({ cls: "runner-form-label", text: "命令" });
+    const cmdInput = cmdFd.createEl("input", {
+      cls: "runner-form-input",
+      attr: { placeholder: "如 npm run dev", spellcheck: "false" },
+    });
+    cmdInput.value = prefill.command;
+
+    // 工作目录
+    const cwdFd = fields.createDiv({ cls: "runner-form-field" });
+    cwdFd.createDiv({ cls: "runner-form-label", text: "工作目录" });
+    const cwdInput = cwdFd.createEl("input", {
+      cls: "runner-form-input",
+      attr: { placeholder: "默认为 vault 根目录", spellcheck: "false" },
+    });
+    cwdInput.value = prefill.cwd;
+
+    // 按钮行
+    const actions = panel.createDiv({ cls: "runner-form-actions" });
+
+    const cancelBtn = actions.createEl("button", {
+      cls: "runner-form-btn is-cancel",
+      text: "取消",
+    });
+    cancelBtn.addEventListener("click", () => this.clearForm());
+
+    const submitBtn = actions.createEl("button", {
+      cls: "runner-form-btn is-cta",
+      text: isEdit ? "保存" : "运行",
+    });
+    submitBtn.addEventListener("click", () =>
+      this.submitForm(nameInput.value, cmdInput.value, cwdInput.value),
+    );
+
+    // 键盘快捷键
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") submitBtn.click();
+      if (e.key === "Escape") cancelBtn.click();
+    };
+    nameInput.addEventListener("keydown", onKey);
+    cmdInput.addEventListener("keydown", onKey);
+    cwdInput.addEventListener("keydown", onKey);
+
+    // 自动聚焦空字段
+    if (!prefill.name) {
+      nameInput.focus();
+    } else {
+      nameInput.focus();
+      nameInput.select();
+    }
+  }
+
+  /** 提交表单 */
+  private submitForm(nameRaw: string, cmdRaw: string, cwdRaw: string): void {
+    const name = nameRaw.trim();
+    const command = cmdRaw.trim();
+    if (!name) {
+      new Notice("请输入名称");
+      return;
+    }
+    if (!command) {
+      new Notice("请输入命令");
+      return;
+    }
+    const cwd = cwdRaw.trim() || this.opts.defaultCwd;
+
+    if (this.formMode === "edit" && this.editingTabId) {
+      const tab = this.tabs.find((t) => t.id === this.editingTabId);
+      if (tab) {
+        tab.name = name;
+        tab.command = command;
+        tab.cwd = cwd;
+        this.saveConfigs();
+      }
+    } else {
+      const tab = createTab(name, command, cwd);
       this.tabs.push(tab);
       this.saveConfigs();
       startProcess(tab, () => this.scheduleRender());
       this.expandedIds.add(tab.id);
       this.expandScrollId = tab.id;
-      this.renderAll();
-    }).open();
-  }
+    }
 
-  private openEditModal(tab: RunnerTab): void {
-    new ProcessModal(
-      this.app,
-      this.opts.defaultCwd,
-      (cfg) => {
-        tab.name = cfg.name;
-        tab.command = cfg.command;
-        tab.cwd = cfg.cwd;
-        this.saveConfigs();
-        this.renderAll();
-      },
-      { name: tab.name, command: tab.command, cwd: tab.cwd },
-    ).open();
+    this.clearForm();
+    this.renderAll();
   }
-
-  // ---- 辅助方法 --------------------------------------------------------------
 
   private saveConfigs(): void {
     this.opts.onSaveConfigs(
@@ -341,98 +479,5 @@ export class RunnerView extends ItemView {
     if (tab.status === "running") return "运行中";
     if (tab.status === "stopped") return "已停止";
     return `已退出 (${tab.exitCode ?? "?"})`;
-  }
-}
-
-// ---- 新建/编辑进程弹窗 ------------------------------------------------------
-
-interface ModalConfig {
-  name?: string;
-  command?: string;
-  cwd?: string;
-}
-
-class ProcessModal extends Modal {
-  private name = "";
-  private command = "";
-  private cwd = "";
-  private readonly defaultCwd: string;
-  private readonly onSubmit: (cfg: { name: string; command: string; cwd: string }) => void;
-
-  constructor(
-    app: import("obsidian").App,
-    defaultCwd: string,
-    onSubmit: (cfg: { name: string; command: string; cwd: string }) => void,
-    existing?: ModalConfig,
-  ) {
-    super(app);
-    this.defaultCwd = defaultCwd;
-    this.onSubmit = onSubmit;
-    this.name = existing?.name ?? "";
-    this.command = existing?.command ?? "";
-    this.cwd = existing?.cwd ?? defaultCwd;
-  }
-
-  onOpen(): void {
-    const isEdit = !!this.name;
-    this.titleEl.setText(isEdit ? "编辑进程" : "新建进程");
-
-    // 名称
-    new Setting(this.contentEl)
-      .setName("名称")
-      .setDesc("显示名称")
-      .addText((t) => {
-        t.setValue(this.name).onChange((v) => (this.name = v));
-        if (!isEdit) t.inputEl.focus();
-      });
-
-    // 命令
-    new Setting(this.contentEl)
-      .setName("命令")
-      .setDesc("任意 shell 命令,如 npm run dev")
-      .addText((t) => {
-        t.setValue(this.command).onChange((v) => (this.command = v));
-        t.inputEl.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") this.submit();
-        });
-      });
-
-    // 工作目录
-    new Setting(this.contentEl)
-      .setName("工作目录")
-      .setDesc("默认为 vault 根目录")
-      .addText((t) => {
-        t.setValue(this.cwd).onChange((v) => (this.cwd = v));
-        t.inputEl.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") this.submit();
-        });
-      });
-
-    new Setting(this.contentEl).addButton((b) =>
-      b
-        .setButtonText(isEdit ? "保存" : "运行")
-        .setCta()
-        .onClick(() => this.submit()),
-    );
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
-
-  private submit(): void {
-    const name = this.name.trim();
-    const command = this.command.trim();
-    if (!name) {
-      new Notice("请输入名称");
-      return;
-    }
-    if (!command) {
-      new Notice("请输入命令");
-      return;
-    }
-    const cwd = this.cwd.trim() || this.defaultCwd;
-    this.close();
-    this.onSubmit({ name, command, cwd });
   }
 }

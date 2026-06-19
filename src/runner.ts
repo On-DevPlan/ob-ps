@@ -96,11 +96,11 @@ export function startProcess(tab: RunnerTab, onChange: () => void): void {
 
   // stdout / stderr 统一写入同一缓冲,简化展示
   child.stdout?.on("data", (data: Buffer) => {
-    appendOutput(tab, data.toString());
+    appendOutput(tab, stripAnsi(data.toString()));
     onChange();
   });
   child.stderr?.on("data", (data: Buffer) => {
-    appendOutput(tab, data.toString());
+    appendOutput(tab, stripAnsi(data.toString()));
     onChange();
   });
   child.on("error", (err: Error) => {
@@ -151,4 +151,9 @@ export function stopProcess(tab: RunnerTab, onChange: () => void): void {
   tab.child = null;
   appendOutput(tab, "\n[已手动停止]\n");
   onChange();
+}
+
+/** 移除 ANSI 颜色/样式转义码,保留纯文本 */
+function stripAnsi(s: string): string {
+  return s.replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, "");
 }

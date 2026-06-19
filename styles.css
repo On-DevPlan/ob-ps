@@ -234,3 +234,126 @@
   color: var(--text-normal);
   scrollbar-width: thin;
 }
+
+/* ===== Inline form panel ===== */
+
+.runner-form-container {
+  margin: 0 8px;
+}
+
+.runner-form-panel {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 2px solid var(--background-modifier-border);
+  border-left: 4px solid var(--interactive-accent);
+  background: var(--background-secondary);
+  animation: runner-form-enter 0.15s ease-out;
+}
+
+@keyframes runner-form-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.runner-form-panel.is-add {
+  border-left-color: #4caf50;
+}
+
+.runner-form-panel.is-edit {
+  border-left-color: var(--interactive-accent);
+}
+
+/* ---- Header ---- */
+
+.runner-form-header {
+  margin-bottom: 8px;
+}
+
+.runner-form-title {
+  font-weight: 700;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+/* ---- Fields ---- */
+
+.runner-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.runner-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.runner-form-label {
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+
+.runner-form-input {
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-family: var(--font-monospace);
+  outline: none;
+  transition: border-color 0.12s;
+  box-sizing: border-box;
+}
+
+.runner-form-input:focus {
+  border-color: var(--interactive-accent);
+}
+
+/* ---- Action buttons ---- */
+
+.runner-form-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.runner-form-btn {
+  padding: 4px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.runner-form-btn:hover {
+  background: var(--interactive-hover);
+}
+
+.runner-form-btn.is-cancel:hover {
+  border-color: var(--text-muted);
+}
+
+.runner-form-btn.is-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.runner-form-btn.is-cta:hover {
+  opacity: 0.85;
+}
