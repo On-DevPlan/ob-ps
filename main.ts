@@ -17,7 +17,7 @@ export default class LocalRunnerPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "open-local-runner",
+      id: "open",
       name: "打开本地进程侧边栏",
       callback: () => {
         void this.activateView();
@@ -34,7 +34,7 @@ export default class LocalRunnerPlugin extends Plugin {
       await leaf?.setViewState({ type: RUNNER_VIEW_TYPE, active: true });
     }
     if (leaf) {
-      workspace.revealLeaf(leaf);
+      void workspace.revealLeaf(leaf);
     }
   }
 }

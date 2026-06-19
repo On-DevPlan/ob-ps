@@ -117,7 +117,7 @@ export class RunnerView extends ItemView {
       return;
     }
     this.rafScheduled = true;
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       this.rafScheduled = false;
       this.renderTabs();
       this.buildControls();

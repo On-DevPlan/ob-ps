@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs --production"
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs --production",
+    "lint": "eslint ."
   },
   "keywords": [
     "obsidian",
@@ -17,10 +18,16 @@
   ],
   "license": "ISC",
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/node": "^20.14.10",
     "builtin-modules": "^4.0.0",
     "esbuild": "^0.23.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.3.0",
+    "globals": "^17.6.0",
+    "jiti": "^2.6.1",
     "obsidian": "^1.4.16",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.59.1"
   }
 }
