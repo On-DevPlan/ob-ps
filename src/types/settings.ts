@@ -18,6 +18,6 @@ export interface PluginSettings {
 export const DEFAULT_SETTINGS: PluginSettings = {
   repairLinksSkillInstalled: false,
   highlightWikilinks: false,
-  keepDataOnUninstall: false,
+  keepDataOnUninstall: true,
   commandGroups: [],
 };
