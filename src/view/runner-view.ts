@@ -26,6 +26,8 @@ export interface ViewOptions {
   defaultCwd: string;
   settings: PluginSettings;
   onSaveConfigs: (configs: ProcessConfig[]) => void;
+  /** 顶栏「双链」按钮：切到双链检查视图 */
+  onOpenInspector: () => void;
 }
 
 /**
@@ -122,6 +124,13 @@ export class RunnerView extends ItemView {
     header.createSpan({ cls: "runner-header-title", text: "本地进程管理" });
 
     const headerRight = header.createDiv({ cls: "runner-header-right" });
+
+    const inspectorBtn = headerRight.createDiv({
+      cls: "runner-header-btn",
+      title: "双链检查",
+    });
+    setIcon(inspectorBtn, "link");
+    inspectorBtn.addEventListener("click", () => this.opts.onOpenInspector());
 
     const settingsBtn = headerRight.createDiv({
       cls: "runner-header-btn",

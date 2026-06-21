@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, MarkdownView, Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import type { ProcessConfig } from "./src/types/process";
 import { DEFAULT_SETTINGS, type PluginSettings } from "./src/types/settings";
 import { RUNNER_VIEW_TYPE, RunnerView, type ViewOptions } from "./src/view";
@@ -10,7 +10,13 @@ import {
 } from "./src/backup/data-backup";
 import { LocalRunnerSettingTab } from "./src/settings-tab";
 import { applyWikilinkStyle } from "./src/wikilink/highlight";
+import {
+  WIKILINK_INSPECTOR_VIEW_TYPE,
+  WikilinkInspectorView,
+  type InspectorViewOptions,
+} from "./src/wikilink-inspector";
 import { isSkillInstalled } from "./src/skills/repair-links";
+import { flattenWikilinks } from "./src/wikilink-inspector/flatten-links";
 
 /** 编程方式跳转到设置标签页(内部 API) */
 interface AppWithSetting {
@@ -99,6 +105,39 @@ export default class LocalRunnerPlugin extends Plugin {
         void this.openSettings();
       },
     });
+    this.addCommand({
+      id: "clear-wikilinks",
+      name: "将当前笔记的双链转为单链",
+      callback: () => {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!view) {
+          new Notice("请先打开一篇笔记");
+          return;
+        }
+        const count = flattenWikilinks(view.editor);
+        new Notice(`已将 ${count} 条双链转为单链`);
+      },
+    });
+
+    // 10. 注册「双链检查」视图
+    this.registerView(WIKILINK_INSPECTOR_VIEW_TYPE, (leaf: WorkspaceLeaf) => {
+      const opts: InspectorViewOptions = {
+        onOpenRunner: () => void this.activateView(),
+      };
+      return new WikilinkInspectorView(leaf, opts);
+    });
+
+    // 11. 双链检查：ribbon + 命令
+    this.addRibbonIcon("link", "双链检查", () => {
+      void this.activateInspectorView();
+    });
+    this.addCommand({
+      id: "open-wikilink-inspector",
+      name: "打开双链检查侧边栏",
+      callback: () => {
+        void this.activateInspectorView();
+      },
+    });
   }
 
   /** 打开插件设置页 */
@@ -117,6 +156,22 @@ export default class LocalRunnerPlugin extends Plugin {
     if (!leaf) {
       leaf = workspace.getRightLeaf(false);
       await leaf?.setViewState({ type: RUNNER_VIEW_TYPE, active: true });
+    }
+    if (leaf) {
+      void workspace.revealLeaf(leaf);
+    }
+  }
+
+  /** 激活(或首次创建)双链检查侧边栏视图 */
+  async activateInspectorView(): Promise<void> {
+    const { workspace } = this.app;
+    let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(WIKILINK_INSPECTOR_VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = workspace.getRightLeaf(false);
+      await leaf?.setViewState({
+        type: WIKILINK_INSPECTOR_VIEW_TYPE,
+        active: true,
+      });
     }
     if (leaf) {
       void workspace.revealLeaf(leaf);
@@ -161,6 +216,7 @@ export default class LocalRunnerPlugin extends Plugin {
         this.savedConfigs = configs;
         void this.saveSettings();
       },
+      onOpenInspector: () => void this.activateInspectorView(),
     };
   }
 

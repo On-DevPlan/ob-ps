@@ -578,87 +578,347 @@
 }
 
 /* ===== Highlighted Wikilinks ===============================================
- * 仅高亮未解析的双链 — 解析成功的链接保持 Obsidian 原生外观不动。
+ * 开启后按"解析状态"区分双链颜色:
+ *   - 已解析(目标笔记存在)    → 蓝色高亮
+ *   - 未解析(目标笔记不存在)  → 绿色高亮
  *
- * 设计哲学:
- * - 不破坏成功链接的阅读节奏
- * - 未解析的链接是"异常"状态,需要用信号色突出(细虚线下划线)
- * - hover 时恢复完整文字色 + 加深下划线,提示"点击可创建"
+ * 选择器依据实测 DOM(两种视图):
+ *   Reading View : <a class="internal-link"> / <a class="internal-link is-unresolved">
+ *   Live Preview : .cm-hmd-internal-link > [.is-unresolved] > .cm-underline
+ *                  (未解析时多一层 .is-unresolved 包裹,与已解析不在同一元素)
+ *
+ * 用 :not() / :not(:has()) 让"已解析"与"未解析"规则互斥,
+ * 避免 hover 时已解析规则误命中未解析链接的级联冲突。
  *
  * 控制 body class: .ob-ps-hl-wl
  * ========================================================================== */
 
-/* ---- Reading Mode: 仅高亮未解析 ---- */
-body.ob-ps-hl-wl body.ob-ps-hl-wl .internal-link.is-unresolved {
-  position: relative;
-  display: inline-block;
-  text-decoration: none;
-
-  color: var(--text-muted);
-
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 88%,
-    color-mix(in srgb, var(--text-accent) 35%, transparent) 88%,
-    color-mix(in srgb, var(--text-accent) 35%, transparent) 96%,
-    transparent 96%
-  );
-
-  border-radius: 2px;
-  padding: 1px 5px;
-  margin: 0 -2px;
-  font-weight: 500;
-  transition: all 0.18s ease;
+/* 配色:亮色主题 */
+body.ob-ps-hl-wl {
+  /* 已解析 —— 蓝 */
+  --ob-wl-resolved-bg: rgba(59, 130, 246, 0.13);
+  --ob-wl-resolved-bg-hi: rgba(59, 130, 246, 0.22);
+  --ob-wl-resolved-fg: #1d4ed8;
+  /* 未解析 —— 绿 */
+  --ob-wl-unresolved-bg: rgba(22, 163, 74, 0.14);
+  --ob-wl-unresolved-bg-hi: rgba(22, 163, 74, 0.24);
+  --ob-wl-unresolved-fg: #15803d;
 }
 
+/* 配色:暗色主题(换更亮的同色系以保证可读性) */
+body.ob-ps-hl-wl.theme-dark {
+  --ob-wl-resolved-bg: rgba(96, 165, 250, 0.16);
+  --ob-wl-resolved-bg-hi: rgba(96, 165, 250, 0.26);
+  --ob-wl-resolved-fg: #93c5fd;
+  --ob-wl-unresolved-bg: rgba(74, 222, 128, 0.16);
+  --ob-wl-unresolved-bg-hi: rgba(74, 222, 128, 0.26);
+  --ob-wl-unresolved-fg: #86efac;
+}
+
+/* ---- Reading View ---- */
+
+/* 已解析 → 蓝 */
+body.ob-ps-hl-wl .internal-link:not(.is-unresolved) {
+  background: var(--ob-wl-resolved-bg);
+  color: var(--ob-wl-resolved-fg);
+  padding: 0.05em 0.35em;
+  margin: 0 -0.1em;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+body.ob-ps-hl-wl .internal-link:not(.is-unresolved):hover {
+  background: var(--ob-wl-resolved-bg-hi);
+}
+
+/* 未解析 → 绿 */
+body.ob-ps-hl-wl .internal-link.is-unresolved {
+  background: var(--ob-wl-unresolved-bg);
+  color: var(--ob-wl-unresolved-fg);
+  padding: 0.05em 0.35em;
+  margin: 0 -0.1em;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background 0.15s ease, color 0.15s ease;
+}
 body.ob-ps-hl-wl .internal-link.is-unresolved:hover {
-  color: var(--text-normal);
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 84%,
-    color-mix(in srgb, var(--text-accent) 55%, transparent) 84%,
-    color-mix(in srgb, var(--text-accent) 55%, transparent) 94%,
-    transparent 94%
-  );
-  filter: brightness(0.95) saturate(1.1);
+  background: var(--ob-wl-unresolved-bg-hi);
 }
 
-/* ---- Live Preview (CM6): 仅高亮未解析 ---- */
-body.ob-ps-hl-wl body.ob-ps-hl-wl .cm-hmd-internal-link.is-unresolved .cm-underline {
-  position: relative;
-  display: inline-block;
-  text-decoration: none;
+/* ---- Live Preview (CM6) ---- */
 
+/* 已解析 → 蓝(:has() 排除掉含 .is-unresolved 的链接) */
+body.ob-ps-hl-wl .cm-hmd-internal-link:not(:has(.is-unresolved)) .cm-underline {
+  background: var(--ob-wl-resolved-bg);
+  color: var(--ob-wl-resolved-fg);
+  padding: 0.05em 0.3em;
+  margin: 0 -0.1em;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+body.ob-ps-hl-wl .cm-hmd-internal-link:not(:has(.is-unresolved)) .cm-underline:hover,
+body.ob-ps-hl-wl .cm-hmd-internal-link:not(:has(.is-unresolved)).cm-active .cm-underline {
+  background: var(--ob-wl-resolved-bg-hi);
+}
+
+/* 未解析 → 绿(实测嵌套:.cm-hmd-internal-link > .is-unresolved > .cm-underline) */
+body.ob-ps-hl-wl .cm-hmd-internal-link .is-unresolved .cm-underline {
+  background: var(--ob-wl-unresolved-bg);
+  color: var(--ob-wl-unresolved-fg);
+  padding: 0.05em 0.3em;
+  margin: 0 -0.1em;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+body.ob-ps-hl-wl .cm-hmd-internal-link .is-unresolved .cm-underline:hover,
+body.ob-ps-hl-wl .cm-hmd-internal-link.cm-active .is-unresolved .cm-underline {
+  background: var(--ob-wl-unresolved-bg-hi);
+}
+
+/* ===== Wikilink Inspector (wli-) ===========================================
+ * 双链检查侧边栏 + Modal。状态色复用笔记内高亮：已解析蓝、未解析绿。
+ * 不与 runner- / ob-ps-hl-wl 规则冲突。
+ * ========================================================================== */
+
+.wli-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wli-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.wli-title {
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+}
+.wli-header-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.wli-header-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
-  font-weight: 500;
-
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 88%,
-    color-mix(in srgb, var(--text-accent) 35%, transparent) 88%,
-    color-mix(in srgb, var(--text-accent) 35%, transparent) 96%,
-    transparent 96%
-  );
-
-  border-radius: 2px;
-  padding: 1px 4px;
-  margin: 0 -2px;
-  transition: all 0.18s ease;
+}
+.wli-header-btn:hover {
+  background: var(--interactive-hover);
+  color: var(--text-normal);
 }
 
-body.ob-ps-hl-wl .cm-hmd-internal-link.is-unresolved .cm-underline:hover,
-body.ob-ps-hl-wl .cm-hmd-internal-link.is-unresolved.cm-active .cm-underline {
+/* 顶栏下方：清除双链操作栏 */
+.wli-action-bar {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.wli-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
   color: var(--text-normal);
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 84%,
-    color-mix(in srgb, var(--text-accent) 55%, transparent) 84%,
-    color-mix(in srgb, var(--text-accent) 55%, transparent) 94%,
-    transparent 94%
-  );
-  filter: brightness(0.95) saturate(1.1);
+  font-size: var(--font-small);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.wli-action-btn:hover {
+  background: var(--interactive-hover);
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.wli-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.wli-empty {
+  color: var(--text-faint);
+  text-align: center;
+  padding: 16px 8px;
+  font-size: var(--font-ui-small);
+}
+
+/* 分组 */
+.wli-section {
+  margin: 0 8px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  overflow: hidden;
+}
+.wli-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--background-secondary);
+}
+.wli-section-head:hover {
+  background: var(--background-modifier-hover);
+}
+.wli-chevron {
+  display: flex;
+  color: var(--text-muted);
+}
+.wli-section.is-collapsed .wli-section-body {
+  display: none;
+}
+.wli-section-title {
+  font-weight: 600;
+  font-size: var(--font-ui-small);
+}
+
+/* 状态色点（蓝=已解析，绿=未解析，与笔记内高亮一致） */
+.wli-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.wli-dot.is-resolved {
+  background: #1d4ed8;
+}
+.wli-dot.is-unresolved {
+  background: #15803d;
+}
+.theme-dark .wli-dot.is-resolved {
+  background: #93c5fd;
+}
+.theme-dark .wli-dot.is-unresolved {
+  background: #86efac;
+}
+
+/* 行 */
+.wli-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.wli-row:hover {
+  background: var(--background-modifier-hover);
+}
+.wli-target {
+  font-weight: 500;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wli-source {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  flex-shrink: 0;
+}
+.wli-time {
+  color: var(--text-faint);
+  font-size: var(--font-smaller);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 加载更多 */
+.wli-load-more {
+  text-align: center;
+  padding: 6px;
+  margin: 2px 10px 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  cursor: pointer;
+}
+.wli-load-more:hover {
+  background: var(--background-modifier-hover);
+  color: var(--interactive-accent);
+}
+
+/* ---- Modal ---- */
+.wli-modal {
+  min-width: 480px;
+  max-width: 720px;
+}
+.wli-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.wli-modal-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.wli-modal-search {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  outline: none;
+}
+.wli-modal-search:focus {
+  border-color: var(--interactive-accent);
+}
+.wli-modal-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.wli-chip {
+  padding: 3px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+}
+.wli-chip:hover {
+  background: var(--background-modifier-hover);
+}
+.wli-chip.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.wli-modal-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.wli-modal-group {
+  margin-bottom: 6px;
+}
+.wli-modal-group-title {
+  font-weight: 600;
+  font-size: var(--font-ui-small);
+  padding: 4px 10px;
+  color: var(--text-muted);
 }

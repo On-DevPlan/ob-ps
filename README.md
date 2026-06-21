@@ -18,6 +18,7 @@ Run local shell commands from an Obsidian sidebar tab with live, per-process out
 - 🗂️ **Command groups** — define reusable presets in settings; the new-process form offers a two-level "group → preset" dropdown to fill the form with one click
 - 🔧 **Wikilink-repair skill installer** — copy the bundled `obsidian-repair-unresolved-links` skill to your vault's `.claude/skills/` with one toggle
 - 🎨 **Highlighted wikilinks** — give internal `[[]]` links a more readable style
+- 🔗 **Wikilink inspector sidebar** — a separate sidebar view listing every `[[ ]]` link grouped by resolved (blue) / unresolved (green), newest source-note first, 5-per-group preview with load-more, and a full-list modal with search/filter; one-click switch to/from the process panel
 - 🪟 **Windows process tree kill** — `taskkill /T /F` so dev servers don't keep your port
 - 🎯 **ANSI stripped** — output is plain text, capped at 200k chars to bound memory
 
@@ -44,6 +45,8 @@ Run local shell commands from an Obsidian sidebar tab with live, per-process out
 4. View output: click the **▾** on the right of the card to expand the log
 5. Edit / delete: click the ✏ / × on the right of the card
 6. Quick fill: when creating, pick a group in the "Command group" dropdown, then a preset — the form auto-fills
+7. Open the **wikilink inspector**: click the `link` ribbon icon (left sidebar) or run "打开双链检查侧边栏" from the command palette — a sidebar view shows every `[[ ]]` link grouped by resolved (blue) / unresolved (green), newest source-note first, 5-per-group preview with load-more, and a full-list modal with search/filter
+8. **Switch between panes**: click the `play` icon in the inspector header to jump to the process pane, or the `link` icon in the process header to jump back
 
 ## Settings
 
@@ -122,6 +125,7 @@ ISC — see [LICENSE](LICENSE).
 
 - 🔧 **双链修复 skill 安装** — 一键把插件自带的 `obsidian-repair-unresolved-links` skill 复制到 vault 的 `.claude/skills/`，用于自动补全未解析的 `[[]]` 双链
 - 🎨 **高亮双链样式** — 开启后笔记中的内部双链以更醒目的样式显示
+- 🔗 **双链检查侧边栏** — 独立侧边栏视图，按解析状态分组列出所有 `[[ ]]` 双链（已解析蓝 / 未解析绿），按源笔记创建时间倒序，默认每组 5 条、可加载更多，「查看全部」打开全量 Modal（搜索/筛选）；与进程面板顶栏一键互跳
 
 **底层细节**
 
@@ -151,6 +155,8 @@ ISC — see [LICENSE](LICENSE).
 4. 查看输出：点卡片右侧的 **▾** 展开日志
 5. 编辑 / 删除：点卡片右侧的 ✏ / ×
 6. 快捷填充：新建时先在「快捷命令组」下拉里选组，再选预设，表单自动填好
+7. 打开**双链检查侧边栏**：点左侧 ribbon 的 `link` 图标或从命令面板运行「打开双链检查侧边栏」——侧边栏列出所有 `[[ ]]` 双链，按已解析（蓝）/ 未解析（绿）分组，按源笔记创建时间倒序，每组默认 5 条、可加载更多，「查看全部」打开全量 Modal（搜索/筛选）
+8. **切换面板**：双链视图顶栏 `play` 按钮→进程视图；进程视图顶栏 `link` 按钮→双链视图，一键互跳
 
 ## 设置
 
