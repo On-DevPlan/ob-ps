@@ -31,7 +31,7 @@ Run local shell commands from an Obsidian sidebar tab with live, per-process out
 
 ### Option 2: From a GitHub Release
 
-1. Download the latest release from the [Releases page](https://github.com/joke-lx/ob-ps/releases)
+1. Download the latest release from the [Releases page](https://github.com/On-DevPlan/ob-ps/releases)
 2. In your vault, create the folder `.obsidian/plugins/local-runner/`
 3. Copy `main.js`, `manifest.json`, and `styles.css` into it (or unzip the release zip)
 4. In Obsidian → **Settings → Community plugins**, reload, and enable **Local Runner**
@@ -138,7 +138,7 @@ ISC — see [LICENSE](LICENSE).
 
 ### 方式 2：从 GitHub Release 手动安装
 
-1. 去 [Releases 页面](https://github.com/joke-lx/ob-ps/releases) 下载最新版
+1. 去 [Releases 页面](https://github.com/On-DevPlan/ob-ps/releases) 下载最新版
 2. 在你的 vault 下创建文件夹：`.obsidian/plugins/local-runner/`
 3. 把 `main.js`、`manifest.json`、`styles.css` 三个文件放进去（直接用 Release 里的 zip 解压也行）
 4. Obsidian → **Settings → Community plugins** → 刷新，启用 **Local Runner**

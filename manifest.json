@@ -4,7 +4,7 @@
   "version": "1.0.14",
   "minAppVersion": "1.7.2",
   "description": "Run local shell commands from a sidebar tab with live output (e.g. npm run dev, npx vite).",
-  "author": "joke-lx",
-  "authorUrl": "https://github.com/joke-lx",
+  "author": "On-DevPlan",
+  "authorUrl": "https://github.com/On-DevPlan",
   "isDesktopOnly": true
 }
