@@ -220,8 +220,8 @@
 /* 完善历史树 canvas 容器 */
 .wli-tree-container {
   flex: none;
-  min-height: 240px;
-  max-height: 420px;
+  min-height: 300px;
+  max-height: 500px;
   width: 100%;
   background: #ffffff;
   border-radius: 8px;

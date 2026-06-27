@@ -387,7 +387,6 @@ export class MergedRunnerInspectorView extends ItemView {
     // 完善历史树 canvas（容错：如果挂载失败不阻止其余 UI）
     this.treeContainerEl = this.wliZoneEl.createDiv({
       cls: "wli-tree-container",
-      attr: { style: "min-height:120px;max-height:360px;width:100%" },
     });
     try {
       this.treeView.mount(this.treeContainerEl);
