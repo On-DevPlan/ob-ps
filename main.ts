@@ -2,12 +2,7 @@ import { FileSystemAdapter, MarkdownView, Notice, Plugin, WorkspaceLeaf } from "
 import type { ProcessConfig } from "./src/types/process";
 import { DEFAULT_SETTINGS, type PluginSettings } from "./src/types/settings";
 import { MERGED_VIEW_TYPE, MergedRunnerInspectorView, type MergedViewOptions } from "./src/view";
-import {
-  REPAIR_UNRESOLVED_LINKS_COMMAND,
-  REPAIR_UNRESOLVED_LINKS_TAB_NAME,
-  isRunning,
-  stopProcess,
-} from "./src/runner";
+import { type RunnerTab } from "./src/runner";
 import {
   removeDataBackup,
   restoreDataBackup,
@@ -17,15 +12,10 @@ import {
 import { LocalRunnerSettingTab } from "./src/settings-tab";
 import { migrateCommandGroups } from "./src/settings-tab/migrate-command-groups";
 import { applyWikilinkStyle } from "./src/wikilink/highlight";
-import {
-  type RepairTabStatus,
-} from "./src/wikilink-inspector";
 import { isSkillInstalled } from "./src/skills/repair-links";
 import { flattenWikilinks } from "./src/wikilink-inspector/flatten-links";
-import { collectRows } from "./src/wikilink-inspector/link-collector";
-import { makeSource } from "./src/view/merged-view";
-import { capture, buildDedupSet } from "./src/link-tree/creation-tracker";
 import { loadEvents, appendEvents } from "./src/link-tree/link-tree-repository";
+import { trackSnapshot } from "./src/link-tree/snapshot-hook";
 import type { CreationEvent } from "./src/link-tree/creation-event";
 
 /** 编程方式跳转到设置标签页(内部 API) */
@@ -60,6 +50,8 @@ export default class LocalRunnerPlugin extends Plugin {
   private linkTreeEvents: CreationEvent[] = [];
 
   async onload(): Promise<void> {
+    console.debug("[DBG onload] local-runner plugin loaded, version=1.0.22-snapshot-hook-v3");
+
     // 1. 加载持久化数据
     let data = (await this.loadData()) as PluginData | null;
 
@@ -202,77 +194,23 @@ export default class LocalRunnerPlugin extends Plugin {
   }
 
   /**
-   * 编排「修复未解析双链」流程:skill 开关自洽 → 拿到 MergedView → 启动进程。
-   * running 状态下重启会先 stop 同名 tab 再 start。
+   * 进程启动前回调:若该进程勾选了「启动时拍双链快照」,
+   * 在此调用 trackSnapshot 拍一次未解析双链快照,追加到 linkTree 日志。
+   * runId 取 tab.id + 时间戳,保证每次进程启动唯一(按 runId 溯源)。
    */
-  async onRepairUnresolvedLinks(): Promise<void> {
-    const vault = this.getDefaultCwd();
-    if (!vault) {
-      new Notice("无法获取 vault 路径");
-      return;
+  async onProcessStart(tab: RunnerTab): Promise<void> {
+    const runId = `${tab.id}_${Date.now()}`;
+    console.debug("[DBG onProcessStart] enter, runId=", runId);
+    try {
+      const newEvents = await trackSnapshot(this, runId);
+      console.debug("[DBG onProcessStart] trackSnapshot returned", newEvents.length, "events");
+      if (newEvents.length) {
+        this.linkTreeEvents = appendEvents(this.linkTreeEvents, newEvents).events;
+        await this.saveSettings();
+      }
+    } catch (e) {
+      console.warn("[link-tree] trackSnapshot failed", e);
     }
-
-    // 1) 磁盘实际未安装 → 引导去设置页, 不启动
-    if (!isSkillInstalled(vault)) {
-      new Notice(
-        "请先在「设置 → local runner」安装 Obsidian-repair-unresolved-links skill",
-      );
-      await this.openSettings();
-      return;
-    }
-
-    // 2) 磁盘已装但开关未开 → 自动开 + 落盘
-    if (!this.settings.repairLinksSkillInstalled) {
-      this.settings.repairLinksSkillInstalled = true;
-      await this.saveSettings();
-    }
-
-    // 3) 确保 MergedView 实例就绪
-    const view = await this.getOrActivateMergedView();
-    if (!view) {
-      new Notice("无法获取视图");
-      return;
-    }
-
-    // 4) running 状态下重启 → 先 stop 同名 tab
-    const existing = view.findTabByCommand(REPAIR_UNRESOLVED_LINKS_COMMAND);
-    if (existing && isRunning(existing)) {
-      stopProcess(existing, () => {});
-    }
-
-    // 4b) 捕获当前未解析双链 → append 到 linkTree 日志
-    const rows = collectRows(makeSource(this.app));
-    const newEvents = capture(
-      rows,
-      buildDedupSet(this.linkTreeEvents),
-      REPAIR_UNRESOLVED_LINKS_COMMAND,
-      Date.now(),
-    );
-    if (newEvents.length) {
-      this.linkTreeEvents = appendEvents(this.linkTreeEvents, newEvents).events;
-      await this.saveSettings();
-    }
-
-    // 5) 启动 (复用同名 或 新建)
-    view.startOrCreateTab(
-      REPAIR_UNRESOLVED_LINKS_TAB_NAME,
-      REPAIR_UNRESOLVED_LINKS_COMMAND,
-      vault,
-    );
-  }
-
-  /** 查询修复 tab 当前状态 —— 供视图按钮图标 + 弹窗使用 */
-  private getRepairTabStatus(): RepairTabStatus {
-    const leaf = this.app.workspace.getLeavesOfType(MERGED_VIEW_TYPE)[0];
-    const view = leaf?.view;
-    if (!(view instanceof MergedRunnerInspectorView)) {
-      return { kind: "not-exists" };
-    }
-    const tab = view.findTabByCommand(REPAIR_UNRESOLVED_LINKS_COMMAND);
-    if (!tab) {
-      return { kind: "not-exists" };
-    }
-    return isRunning(tab) ? { kind: "running" } : { kind: "exited" };
   }
 
   /** 获取 MergedView 实例 */
@@ -309,9 +247,8 @@ export default class LocalRunnerPlugin extends Plugin {
         this.settings.commandGroups = groups;
         void this.saveSettings();
       },
-      getRepairTabStatus: () => this.getRepairTabStatus(),
-      onRepairUnresolvedLinks: () => void this.onRepairUnresolvedLinks(),
       getLinkTreeEvents: () => this.linkTreeEvents,
+      onProcessStart: (tab) => this.onProcessStart(tab),
     };
   }
 

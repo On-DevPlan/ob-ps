@@ -11,4 +11,9 @@ export interface ProcessConfig {
   command: string;
   /** 工作目录 */
   cwd: string;
+  /**
+   * 启动时是否拍双链快照(默认 false)。
+   * 勾选后,进程启动前调 trackSnapshot(host, "repair-links")。
+   */
+  snapshotEnabled?: boolean;
 }

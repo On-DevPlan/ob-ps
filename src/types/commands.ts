@@ -11,4 +11,6 @@ export interface CommandGroup {
   cwd: string;      // 工作目录(空表示用默认)
   /** 是否在侧边栏显示(默认 true) */
   visible?: boolean;
+  /** 启动时是否拍双链快照(默认 false) */
+  snapshotEnabled?: boolean;
 }
