@@ -121,5 +121,20 @@ export function render(
       group.cwd = cwdInput.value;
       void host.saveSettings();
     });
+
+    // 启动时拍双链快照
+    const snapRow = card.createDiv({ cls: "cg-card-row is-check" });
+    const snapCheck = snapRow.createEl("input", {
+      attr: { type: "checkbox", id: `snap-${group.id}` },
+    });
+    snapCheck.checked = group.snapshotEnabled ?? false;
+    snapCheck.addEventListener("change", () => {
+      group.snapshotEnabled = snapCheck.checked;
+      void host.saveSettings();
+    });
+    snapRow.createEl("label", {
+      attr: { for: `snap-${group.id}` },
+      text: "启动时拍双链快照",
+    });
   }
 }

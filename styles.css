@@ -566,6 +566,25 @@
   gap: 2px;
 }
 
+.runner-form-field.is-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.runner-form-check {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.runner-form-check-label {
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
 .runner-form-label {
   font-size: var(--font-smaller);
   color: var(--text-muted);
@@ -929,6 +948,21 @@ body.ob-ps-hl-wl .cm-s-obsidian span.cm-hmd-barelink.cm-link {
 }
 .cg-card-input.is-mono {
   font-family: var(--font-monospace);
+}
+
+.cg-card-row.is-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+}
+
+.cg-card-row.is-check input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
 }
 
 /* Generic hide helper */

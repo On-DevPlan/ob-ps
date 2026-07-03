@@ -1,5 +1,4 @@
 import { ItemView, MarkdownView, Notice, setIcon, TFile, WorkspaceLeaf } from "obsidian";
-import type { App, CachedMetadata } from "obsidian";
 import type { ProcessConfig } from "../types/process";
 import type { CommandGroup } from "../types/commands";
 import type { PluginSettings } from "../types/settings";
@@ -13,13 +12,11 @@ import {
   startProcess,
   stopProcess,
 } from "../runner";
-import { collectRows, type CollectorSource, type RawLinkEntry } from "../wikilink-inspector/link-collector";
+import { collectRows } from "../wikilink-inspector/link-collector";
 import { partitionByState, type LinkRow } from "../wikilink-inspector/link-row";
 import { renderInspectorRow } from "../wikilink-inspector/inspector-render";
 import { ClearUnresolvedConfirmModal } from "../wikilink-inspector/clear-unresolved-modal";
 import { makeUnresolvedSource } from "../wikilink-inspector/clear-unresolved";
-import type { RepairTabStatus } from "../wikilink-inspector/repair-modal";
-import { WliRepairConfirmModal } from "../wikilink-inspector/repair-modal";
 import { ConfirmModal } from "./confirm-modal";
 import {
   renderProcessForm,
@@ -27,7 +24,6 @@ import {
   type FormPrefill,
   type FormSubmitResult,
 } from "./process-form";
-import { REPAIR_UNRESOLVED_LINKS_COMMAND } from "../runner";
 import { TreeLinkView } from "../link-tree/link-tree-view";
 import type { CreationEvent } from "../link-tree/creation-event";
 
@@ -41,45 +37,18 @@ export interface MergedViewOptions {
   settings: PluginSettings;
   onSaveConfigs: (configs: ProcessConfig[]) => void;
   onSaveCommandGroups: (groups: CommandGroup[]) => void;
-  getRepairTabStatus: () => RepairTabStatus;
-  onRepairUnresolvedLinks: () => void | Promise<void>;
   /** 返回当前 linkTree 事件列表（由 main.ts 在捕获后更新） */
   getLinkTreeEvents: () => CreationEvent[];
+  /**
+   * 进程启动前回调。若 tab.snapshotEnabled 为真,main.ts 在此拍双链快照。
+   * 返回 Promise<void>;view 在 await 完成后再 startProcess。
+   */
+  onProcessStart?: (tab: RunnerTab) => Promise<void> | void;
 }
 
-export function makeSource(app: App): CollectorSource {
-  return {
-    listFiles() {
-      return app.vault.getMarkdownFiles().map((f) => ({
-        path: f.path,
-        ctime: f.stat.ctime,
-      }));
-    },
-    getLinks(path) {
-      const file = app.vault.getAbstractFileByPath(path);
-      if (!(file instanceof TFile)) return null;
-      const cache: CachedMetadata | null = app.metadataCache.getFileCache(file);
-      if (!cache) return null;
-      const entries: RawLinkEntry[] = [];
-      for (const l of cache.links ?? []) {
-        entries.push({
-          link: l.link,
-          position: l.position
-            ? { line: l.position.start.line, col: l.position.start.col }
-            : undefined,
-        });
-      }
-      for (const l of cache.frontmatterLinks ?? []) {
-        entries.push({ link: l.link });
-      }
-      return entries;
-    },
-    unresolvedTargets(path) {
-      const map = app.metadataCache.unresolvedLinks[path] ?? {};
-      return new Set(Object.keys(map));
-    },
-  };
-}
+// makeSource 已抽到 wikilink-inspector/link-source(便于 link-tree 复用,避免反向依赖 view)
+import { makeSource } from "../wikilink-inspector/link-source";
+export { makeSource };
 
 export class MergedRunnerInspectorView extends ItemView {
   // WLI state
@@ -125,6 +94,17 @@ export class MergedRunnerInspectorView extends ItemView {
   private treeContainerVisible = false;
   private treeToggleBtnEl!: HTMLElement;
 
+  /**
+   * snapshot 监听器引用计数。
+   * 每启动一个 snapshotEnabled 进程 +1,进程退出 -1。
+   * refCount > 0 时注册一个 metadataCache.on("resolved") 监听器;
+   * refCount === 0 时注销该监听器。
+   * _snapshotActiveTabs 确保退出回调幂等(同一 tab 不重复减)。
+   */
+  private _snapshotRefCount = 0;
+  private _snapshotEventRef: ReturnType<typeof this.app.metadataCache.on> | null = null;
+  private _snapshotActiveTabs = new Set<string>();
+
   constructor(leaf: WorkspaceLeaf, opts: MergedViewOptions) {
     super(leaf);
     this.opts = opts;
@@ -158,13 +138,8 @@ export class MergedRunnerInspectorView extends ItemView {
   async onOpen(): Promise<void> {
     this.buildUi();
     this.refreshWli();
-    this.registerEvent(
-      this.app.metadataCache.on("resolved", () => this.scheduleWliRefresh()),
-    );
-    this.registerEvent(
-      this.app.metadataCache.on("changed", () => this.scheduleWliRefresh()),
-    );
     // 用户切到不同笔记(主区 active leaf 变化)→ 树立即高亮新节点
+    // 这个监听器与进程生命周期无关,常驻
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         const newActive = this.getActiveNotePath();
@@ -178,6 +153,13 @@ export class MergedRunnerInspectorView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    // 清理 snapshot 监听器(进程退出前 close view 的兜底)
+    if (this._snapshotEventRef) {
+      this.app.metadataCache.offref(this._snapshotEventRef);
+      this._snapshotEventRef = null;
+      this._snapshotRefCount = 0;
+      this._snapshotActiveTabs.clear();
+    }
     if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
     for (const tab of this.tabs) {
       if (tab.child) {
@@ -204,15 +186,17 @@ export class MergedRunnerInspectorView extends ItemView {
       output: "",
       child: null,
       generation: 0,
+      snapshotEnabled: c.snapshotEnabled ?? false,
     }));
     this.expandedIds.clear();
     this.outputElMap.clear();
     this.renderProcAll();
   }
 
-  startOrCreateTab(name: string, command: string, cwd: string): RunnerTab {
+  startOrCreateTab(name: string, command: string, cwd: string, snapshotEnabled = false): RunnerTab {
     const { tab, created } = resolveOrCreateTab(this.tabs, name, command, cwd);
     if (created) {
+      tab.snapshotEnabled = snapshotEnabled;
       this.tabs.push(tab);
       this.expandedIds.add(tab.id);
       this.expandScrollId = tab.id;
@@ -220,6 +204,10 @@ export class MergedRunnerInspectorView extends ItemView {
       this.renderProcAll();
     }
     tab.output = "";
+    if (tab.snapshotEnabled) {
+      void this.opts.onProcessStart?.(tab);
+      this._incSnapshotRef(tab.id, tab.name);
+    }
     startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
     return tab;
   }
@@ -297,18 +285,7 @@ export class MergedRunnerInspectorView extends ItemView {
     this.procBtnGridEl.empty();
     const groups = this.opts.settings.commandGroups ?? [];
     const visible = groups.filter((g) => g.visible !== false);
-
-    // ★ 注入默认「完善双链」按钮（若 commandGroups 未配置相同命令）
-    const hasRepairConfigured = visible.some(
-      (g) => g.command === REPAIR_UNRESOLVED_LINKS_COMMAND,
-    );
-    if (!hasRepairConfigured) {
-      this.appendQuickBtn(
-        "完善",
-        REPAIR_UNRESOLVED_LINKS_COMMAND,
-        () => this.onRepairBtnClick(),
-      );
-    }
+    console.debug("[DBG refreshQuickBar] visible groups:", visible.map((g) => g.name));
 
     for (const group of visible) {
       const tab = this.tabs.find((t) => t.command === group.command);
@@ -316,13 +293,14 @@ export class MergedRunnerInspectorView extends ItemView {
         group.name,
         group.command,
         tab
-          ? () => this.toggleProcess(tab)
-          : () => this.startOrCreateTab(group.name, group.command, group.cwd || this.opts.defaultCwd),
+          ? () => {
+            // 更新 tab 的快照标记(命令组可能已变)
+            tab.snapshotEnabled = group.snapshotEnabled ?? false;
+            void this.toggleProcess(tab);
+          }
+          : () => this.startOrCreateTab(group.name, group.command, group.cwd || this.opts.defaultCwd, group.snapshotEnabled ?? false),
         tab,
       );
-    }
-    if (visible.length === 0 && hasRepairConfigured === false) {
-      // 仅默认按钮时也保留渲染（已渲染），无需额外处理
     }
   }
 
@@ -405,25 +383,6 @@ export class MergedRunnerInspectorView extends ItemView {
     }
   }
 
-  /** 完善按钮点击 —— 走 WliRepairConfirmModal 弹窗 */
-  private onRepairBtnClick(): void {
-    const status = this.opts.getRepairTabStatus();
-    new WliRepairConfirmModal(this.app, status, {
-      onLaunch: () => {
-        void this.opts.onRepairUnresolvedLinks();
-      },
-      onReveal: () => {
-        // 找到修复 tab 并展开(替代旧 revealRunnerTab leaf 切换)
-        const tab = this.findTabByCommand(REPAIR_UNRESOLVED_LINKS_COMMAND);
-        if (tab) {
-          this.expandedIds.add(tab.id);
-          this.expandScrollId = tab.id;
-          this.renderProcAll();
-        }
-      },
-    }).open();
-  }
-
   /** 双链树 切换按钮点击 —— 显示/隐藏 treeContainer */
   private toggleTreeContainer(): void {
     this.treeContainerVisible = !this.treeContainerVisible;
@@ -435,6 +394,43 @@ export class MergedRunnerInspectorView extends ItemView {
       const activePath = this.getActiveNotePath();
       this.treeView.updateFromApp(events, this.app, activePath);
     }
+  }
+
+  // ---- Snapshot 监听器引用计数 ------------------------------------------------
+
+  /**
+   * 注册一次 metadataCache.on("resolved") 回调。
+   * refCount === 1 时才真正注册(单监听器),之后仅递增计数。
+   * tabId 用于幂等:同一 tab 多次调用不会重复计数。
+   */
+  private _incSnapshotRef(tabId: string, tabName: string): void {
+    if (this._snapshotActiveTabs.has(tabId)) return;
+    this._snapshotActiveTabs.add(tabId);
+    this._snapshotRefCount++;
+    if (this._snapshotRefCount === 1) {
+      const cb = () => {
+        const activePath = this.getActiveNotePath();
+        this.treeView.updateFromApp(this.opts.getLinkTreeEvents(), this.app, activePath);
+      };
+      this._snapshotEventRef = this.app.metadataCache.on("resolved", cb);
+    }
+    console.debug(`[snapshot] 进程「${tabName}」启动，开始监听未解析双链 (refCount=${this._snapshotRefCount})`);
+  }
+
+  /**
+   * 注销一次 metadataCache.on("resolved") 回调。
+   * refCount === 0 时才真正注销,且幂等。
+   */
+  private _decSnapshotRef(tabId: string, tabName: string): void {
+    if (!this._snapshotActiveTabs.has(tabId)) return;
+    this._snapshotActiveTabs.delete(tabId);
+    this._snapshotRefCount--;
+    if (this._snapshotRefCount <= 0 && this._snapshotEventRef) {
+      this.app.metadataCache.offref(this._snapshotEventRef);
+      this._snapshotEventRef = null;
+      this._snapshotRefCount = 0;
+    }
+    console.debug(`[snapshot] 进程「${tabName}」退出，结束监听 (refCount=${this._snapshotRefCount})`);
   }
 
   /** 当前打开的 MarkdownView —— 用于 link-tree 跳转与作用域过滤 */
@@ -642,6 +638,11 @@ export class MergedRunnerInspectorView extends ItemView {
   private onProcChange(tabId: string, kind: ProcChangeKind): void {
     if (kind === "status") {
       this.renderProcAll();
+      // snapshotEnabled 进程退出 → 注销监听器(引用计数)
+      const tab = this.tabs.find((t) => t.id === tabId);
+      if (tab?.snapshotEnabled && !isRunning(tab)) {
+        this._decSnapshotRef(tabId, tab.name);
+      }
       return;
     }
     this.scheduleProcRender(tabId);
@@ -760,11 +761,21 @@ export class MergedRunnerInspectorView extends ItemView {
 
   // ---- 进程操作 (启停编辑删除) ------------------------------------------------
 
-  private toggleProcess(tab: RunnerTab): void {
+  private async toggleProcess(tab: RunnerTab): Promise<void> {
     if (isRunning(tab)) {
       stopProcess(tab, (kind) => this.onProcChange(tab.id, kind));
     } else if (tab.status === "stopped") {
       tab.output = "";
+      // 启动前若该进程勾选了 snapshot,先拍快照
+      if (tab.snapshotEnabled) {
+        try {
+          await this.opts.onProcessStart?.(tab);
+        } catch (e) {
+          console.warn("[link-tree] onProcessStart snapshot failed", e);
+        }
+        // 注册 metadataCache 监听器(引用计数,单例)
+        this._incSnapshotRef(tab.id, tab.name);
+      }
       startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
     } else {
       tab.output = "";
@@ -830,6 +841,7 @@ export class MergedRunnerInspectorView extends ItemView {
       name: editingTab?.name ?? "",
       command: editingTab?.command ?? "",
       cwd: editingTab?.cwd ?? this.opts.defaultCwd,
+      snapshotEnabled: editingTab?.snapshotEnabled ?? false,
     };
 
     renderProcessForm(this.formEl, {
@@ -838,12 +850,12 @@ export class MergedRunnerInspectorView extends ItemView {
       prefill,
       commandGroups: this.opts.settings.commandGroups ?? [],
       defaultCwd: this.opts.defaultCwd,
-      onSubmit: (result) => this.handleFormSubmit(result),
+      onSubmit: (result) => { void this.handleFormSubmit(result); },
       onSaveToGroup: (entry) => this.handleSaveToGroup(entry),
     });
   }
 
-  private handleFormSubmit(result: FormSubmitResult): void {
+  private async handleFormSubmit(result: FormSubmitResult): Promise<void> {
     if (result.kind === "cancel") {
       this.clearForm();
       return;
@@ -857,6 +869,14 @@ export class MergedRunnerInspectorView extends ItemView {
     // add
     this.tabs.push(result.tab);
     if (result.autostart) {
+      if (result.tab.snapshotEnabled) {
+        try {
+          await this.opts.onProcessStart?.(result.tab);
+        } catch (e) {
+          console.warn("[link-tree] onProcessStart snapshot failed", e);
+        }
+        this._incSnapshotRef(result.tab.id, result.tab.name);
+      }
       startProcess(result.tab, (kind) => this.onProcChange(result.tab.id, kind));
     }
     this.expandedIds.add(result.tab.id);
@@ -897,6 +917,7 @@ export class MergedRunnerInspectorView extends ItemView {
         name: t.name,
         command: t.command,
         cwd: t.cwd,
+        snapshotEnabled: t.snapshotEnabled ?? false,
       })),
     );
   }

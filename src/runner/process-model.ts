@@ -34,6 +34,8 @@ export interface RunnerTab {
    * 避免在用户「点停-点启」竞态下旧进程污染新进程的状态。
    */
   generation: number;
+  /** 启动时是否拍双链快照(从 ProcessConfig.snapshotEnabled 继承) */
+  snapshotEnabled?: boolean;
 }
 
 /** 是否正在运行(子进程存在且状态为 running) */
