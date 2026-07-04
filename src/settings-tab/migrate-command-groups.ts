@@ -53,7 +53,9 @@ export function migrateCommandGroups(input: unknown): CommandGroup[] {
         });
       }
     } else {
-      // 新形状:直接取字段,缺失则空
+      // 新形状:直接取字段,缺失则空。
+      // 必须保留 snapshotEnabled —— 否则用户勾选「启动时拍双链快照」,
+      // 下次 onload 走这条迁移分支会把该项擦掉,看似"勾选没生效"。
       const cg = g as Partial<CommandGroup>;
       result.push({
         id: (cg.id ?? nextGroupId()).toString() || nextGroupId(),
@@ -61,6 +63,7 @@ export function migrateCommandGroups(input: unknown): CommandGroup[] {
         command: (cg.command ?? "").toString(),
         cwd: (cg.cwd ?? "").toString(),
         visible: cg.visible !== false,
+        snapshotEnabled: cg.snapshotEnabled === true,
       });
     }
   }

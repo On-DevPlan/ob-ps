@@ -4,7 +4,6 @@ import type { CommandGroup } from "../types/commands";
 import type { PluginSettings } from "../types/settings";
 import { nextGroupId } from "../settings-tab/group-id";
 import {
-  appendOutput,
   isRunning,
   resolveOrCreateTab,
   type ProcChangeKind,
@@ -146,6 +145,19 @@ export class MergedRunnerInspectorView extends ItemView {
         this.treeView.updateFromApp(this.opts.getLinkTreeEvents(), this.app, newActive);
       }),
     );
+    // WLI 列表热刷新：vault 中任何 .md 完成链接解析(新建/修改) → 重算 unresolved。
+    // 否则用户在某条笔记里写下 [[target]] 后,侧边栏列表不会即时出现该未解析。
+    //
+    // 必须用 'changed' 而不是 'resolved':
+    //   - 'changed' : 文件索引更新即触发(覆盖新写入的 [[target]])
+    //   - 'resolved': 仅在该文件「所有 [[]] 都能解析」时触发 —— target 不存在时不会触发,
+    //                  这正是 wikilink 检查的需求场景,选错事件导致列表永不更新。
+    // 见 https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache/on
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        this.scheduleWliRefresh();
+      }),
+    );
     if (this.pendingConfigs) {
       this.setTabsFromConfigs(this.pendingConfigs);
       this.pendingConfigs = null;
@@ -170,6 +182,12 @@ export class MergedRunnerInspectorView extends ItemView {
   }
 
   // ---- Public API for main.ts -----------------------------------------------
+
+  /** 设置 tab 改动 commandGroups 后调用,让侧边栏快速按钮栏重建 */
+  notifyCommandGroupsChanged(): void {
+    if (!this.procBtnGridEl) return; // view 还没 buildUi(onOpen 之前)
+    this.refreshQuickBar();
+  }
 
   setTabsFromConfigs(configs: ProcessConfig[]): void {
     if (!this.procBodyEl) {
@@ -761,29 +779,25 @@ export class MergedRunnerInspectorView extends ItemView {
 
   // ---- 进程操作 (启停编辑删除) ------------------------------------------------
 
+  /** 按钮点击行为:running → stop;其他(含 stopped / exited-ok / exited-err)→ start */
   private async toggleProcess(tab: RunnerTab): Promise<void> {
     if (isRunning(tab)) {
       stopProcess(tab, (kind) => this.onProcChange(tab.id, kind));
-    } else if (tab.status === "stopped") {
-      tab.output = "";
-      // 启动前若该进程勾选了 snapshot,先拍快照
-      if (tab.snapshotEnabled) {
-        try {
-          await this.opts.onProcessStart?.(tab);
-        } catch (e) {
-          console.warn("[link-tree] onProcessStart snapshot failed", e);
-        }
-        // 注册 metadataCache 监听器(引用计数,单例)
-        this._incSnapshotRef(tab.id, tab.name);
-      }
-      startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
-    } else {
-      tab.output = "";
-      tab.status = "stopped";
-      tab.exitCode = null;
-      appendOutput(tab, "\n[已重置]\n");
-      this.renderProcAll();
+      return;
     }
+
+    // exited-* / stopped → 直接启动;startProcess 入口处的 child 空判断与 generation
+    // 自增保证了旧子进程(exited-* 路径 close 回调里已 tab.child=null)不会污染新进程。
+    tab.output = "";
+    if (tab.snapshotEnabled) {
+      try {
+        await this.opts.onProcessStart?.(tab);
+      } catch (e) {
+        console.warn("[link-tree] onProcessStart snapshot failed", e);
+      }
+      this._incSnapshotRef(tab.id, tab.name);
+    }
+    startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
   }
 
   // ---- 删除进程 --------------------------------------------------------------

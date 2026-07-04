@@ -227,6 +227,17 @@ export default class LocalRunnerPlugin extends Plugin {
     return view instanceof MergedRunnerInspectorView ? view : null;
   }
 
+  /** 设置 tab 改动 commandGroups 后调用:通知已打开的 merged-view 重建快速按钮栏。
+   * 仅在 view 已存在时通知;避免因设置改动强行把侧边栏弹出来。
+   */
+  async notifyCommandGroupsChanged(): Promise<void> {
+    const leaf = this.app.workspace.getLeavesOfType(MERGED_VIEW_TYPE)[0];
+    const view = leaf?.view;
+    if (view instanceof MergedRunnerInspectorView) {
+      view.notifyCommandGroupsChanged();
+    }
+  }
+
   /** 根据设置开关添加/移除高亮双链 body class */
   applyWikilinkStyle(): void {
     applyWikilinkStyle(this.settings);
@@ -284,6 +295,7 @@ function shallowEqualGroups(
     if (x.name !== y.name) return false;
     if (x.command !== y.command) return false;
     if ((x.cwd ?? "") !== (y.cwd ?? "")) return false;
+    if ((x.snapshotEnabled ?? false) !== (y.snapshotEnabled ?? false)) return false;
   }
   return true;
 }

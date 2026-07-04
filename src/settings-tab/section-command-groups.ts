@@ -8,6 +8,8 @@ export interface CommandGroupsSectionHost {
   saveSettings(): Promise<void>;
   /** 通知宿主重新绘制整个设置页(用于 add / del 后) */
   refreshSettings(): void;
+  /** 通知侧边栏视图重建快速按钮(add / del / 字段变更后) */
+  notifyCommandGroupsChanged?: () => void;
 }
 
 /**
@@ -26,6 +28,13 @@ export function render(
 
   const groups = host.settings.commandGroups;
 
+  /** 保存并热通知侧边栏视图刷新快速按钮栏。
+   * 若失败或不支持通知,仍走 host.saveSettings()。
+   */
+  const commit = (): void => {
+    void host.saveSettings().then(() => host.notifyCommandGroupsChanged?.());
+  };
+
   // ---- 工具栏:新建按钮 ----
   const toolbar = containerEl.createDiv({ cls: "cg-toolbar" });
   const addBtn = toolbar.createEl("button", {
@@ -37,6 +46,7 @@ export function render(
     groups.push({ id, name: "新命令", command: "", cwd: "", visible: true });
     void host.saveSettings().then(() => {
       host.refreshSettings();
+      host.notifyCommandGroupsChanged?.();
     });
   });
 
@@ -65,7 +75,7 @@ export function render(
     nameInput.value = group.name;
     nameInput.addEventListener("change", () => {
       group.name = nameInput.value;
-      void host.saveSettings();
+      commit();
     });
 
     const rightGroup = topRow.createDiv({ cls: "cg-card-actions" });
@@ -83,7 +93,7 @@ export function render(
       visBtn.setAttr("title", group.visible ? "点击隐藏" : "点击显示");
       visBtn.toggleClass("is-visible", group.visible);
       card.toggleClass("is-hidden-cmd", !group.visible);
-      void host.saveSettings();
+      commit();
     });
 
     // 删除按钮
@@ -97,7 +107,10 @@ export function render(
       const idx = groups.findIndex((g) => g.id === group.id);
       if (idx < 0) return;
       groups.splice(idx, 1);
-      void host.saveSettings().then(() => host.refreshSettings());
+      void host.saveSettings().then(() => {
+        host.refreshSettings();
+        host.notifyCommandGroupsChanged?.();
+      });
     });
 
     // 命令输入
@@ -108,7 +121,7 @@ export function render(
     cmdInput.value = group.command;
     cmdInput.addEventListener("change", () => {
       group.command = cmdInput.value;
-      void host.saveSettings();
+      commit();
     });
 
     // 目录输入
@@ -119,7 +132,7 @@ export function render(
     cwdInput.value = group.cwd;
     cwdInput.addEventListener("change", () => {
       group.cwd = cwdInput.value;
-      void host.saveSettings();
+      commit();
     });
 
     // 启动时拍双链快照
@@ -130,7 +143,7 @@ export function render(
     snapCheck.checked = group.snapshotEnabled ?? false;
     snapCheck.addEventListener("change", () => {
       group.snapshotEnabled = snapCheck.checked;
-      void host.saveSettings();
+      commit();
     });
     snapRow.createEl("label", {
       attr: { for: `snap-${group.id}` },

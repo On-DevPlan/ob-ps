@@ -23,6 +23,8 @@ export interface SettingTabHost {
   saveSettings(): Promise<void>;
   getDefaultCwd(): string;
   applyWikilinkStyle(): void;
+  /** 命令组变更后通知侧边栏视图(可选,缺失则只持久化不热更新) */
+  notifyCommandGroupsChanged?: () => void;
 }
 
 /**
@@ -77,6 +79,7 @@ export class LocalRunnerSettingTab extends PluginSettingTab {
       settings: { commandGroups: groups },
       saveSettings: () => host.saveSettings(),
       refreshSettings: () => this.refreshDisplay(),
+      notifyCommandGroupsChanged: () => host.notifyCommandGroupsChanged?.(),
     });
   }
 
