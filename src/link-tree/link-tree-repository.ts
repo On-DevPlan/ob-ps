@@ -40,10 +40,3 @@ export function appendEvents(
     version: LINK_TREE_VERSION,
   };
 }
-
-/**
- * 从零创建初始 store（无事件时初始化用）。
- */
-export function createEmptyStore(): LinkTreeStore {
-  return { events: [], version: LINK_TREE_VERSION };
-}

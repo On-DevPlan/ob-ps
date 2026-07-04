@@ -22,6 +22,7 @@ export interface SettingTabHost {
   settings: PluginSettings;
   saveSettings(): Promise<void>;
   getDefaultCwd(): string;
+  // Kept because sectionWikilink.render still consumes it via the host bag.
   applyWikilinkStyle(): void;
   /** 命令组变更后通知侧边栏视图(可选,缺失则只持久化不热更新) */
   notifyCommandGroupsChanged?: () => void;
@@ -61,7 +62,6 @@ export class LocalRunnerSettingTab extends PluginSettingTab {
       settings: host.settings,
       saveSettings: () => host.saveSettings(),
       getDefaultCwd: () => host.getDefaultCwd(),
-      applyWikilinkStyle: () => host.applyWikilinkStyle(),
     });
     sectionWikilink.render(containerEl, {
       settings: host.settings,
@@ -92,12 +92,4 @@ export class LocalRunnerSettingTab extends PluginSettingTab {
     this.containerEl.empty();
     this.renderSettings();
   }
-}
-
-/** 供 main.ts 调用的状态同步钩子:在 onload 时纠正已安装但目录缺失的情况 */
-export function reconcileInstalledFlag(
-  vault: string,
-  settings: PluginSettings,
-): boolean {
-  return sectionSkills.reconcileInstalledFlag(vault, settings);
 }

@@ -42,7 +42,7 @@ npm run lint         # → eslint .
 - **生产/CI 模式**(`--production`):只写 `main.js` 到项目根目录,供 `release.yml` 上传为 release assets
 - **开发模式**(无 `--production`):写 `main.js` + 同步到 `../123/.obsidian/plugins/local-runner/`(manifest、styles、`.claude/skills/obsidian-repair-unresolved-links` 一并同步)
 - 可通过环境变量 `LOCAL_RUNNER_VAULT` 覆盖同步目标路径
-- skill 一并同步是**刻意的**:设置页「添加双链修复 skill」开关依赖插件安装目录下存在该 skill 源目录(`main.ts` 的 `installSkill()` 从 `getPluginInstallDir()/.claude/skills/` 读取)。注意 release zip 只含 `main.js`/`manifest.json`/`styles.css`、**不含** skill,所以该开关仅在 dev/同步安装下可用
+- skill 一并同步是**刻意的**:设置页「skill 管理」段(在 ob-ps 设置面板内)允许用户填入任意 degit 源直接安装到当前 vault 的 `.claude/skills/` 目录,**不依赖**插件安装目录存在该 skill 源。安装来源由用户输入决定;release zip 行为不变(只含 `main.js` / `manifest.json` / `styles.css`)。
 
 ## 源文件职责
 

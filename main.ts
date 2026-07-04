@@ -12,7 +12,7 @@ import {
 import { LocalRunnerSettingTab } from "./src/settings-tab";
 import { migrateCommandGroups } from "./src/settings-tab/migrate-command-groups";
 import { applyWikilinkStyle } from "./src/wikilink/highlight";
-import { isSkillInstalled } from "./src/skills/repair-links";
+import { reconcileInstalledFlag } from "./src/settings-tab/section-skills";
 import { flattenWikilinks } from "./src/wikilink-inspector/flatten-links";
 import { loadEvents, appendEvents } from "./src/link-tree/link-tree-repository";
 import { trackSnapshot } from "./src/link-tree/snapshot-hook";
@@ -89,6 +89,12 @@ export default class LocalRunnerPlugin extends Plugin {
 
     // 6. 应用高亮双链样式
     applyWikilinkStyle(this.settings);
+    // Obsidian 切换主题时会翻转 body.theme-dark，fg vars 要重新注入
+    this.registerEvent(
+      this.app.workspace.on("css-change", () => {
+        applyWikilinkStyle(this.settings);
+      }),
+    );
 
     // 7. 注册设置标签页
     this.addSettingTab(new LocalRunnerSettingTab(this.app, this));
@@ -270,14 +276,9 @@ export default class LocalRunnerPlugin extends Plugin {
 
   /** 同步「已安装」与磁盘状态:已安装但目录不存在时自动重置 */
   private reconcileInstalledFlag(): void {
-    if (!this.settings.repairLinksSkillInstalled) {
-      return;
-    }
     const vault = this.getDefaultCwd();
-    if (vault && !isSkillInstalled(vault)) {
-      this.settings.repairLinksSkillInstalled = false;
-      this.saveSettings().catch(() => {});
-    }
+    const changed = reconcileInstalledFlag(this.settings, vault);
+    if (changed) this.saveSettings().catch(() => {});
   }
 }
 

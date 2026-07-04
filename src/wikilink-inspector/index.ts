@@ -5,13 +5,6 @@ export { collectRows } from "./link-collector";
 export { renderInspectorRow, formatCtime } from "./inspector-render";
 export { WikilinkInspectorModal } from "./inspector-modal";
 export {
-  type RepairTabStatus,
-  type ModalContent,
-  type RepairModalCallbacks,
-  pickModalContent,
-  WliRepairConfirmModal,
-} from "./repair-modal";
-export {
   type ClearUnresolvedContent,
   type ClearUnresolvedCallbacks,
   pickClearUnresolvedContent,

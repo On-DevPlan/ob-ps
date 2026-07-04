@@ -132,11 +132,3 @@ export function layoutTree(roots: LayoutNode[]): LayoutResult {
     bounds: { minX, minY, maxX, maxY },
   };
 }
-
-/**
- * 从存储型 LayoutNode 映射为带显示坐标的 NodePos；
- * 供 canvas renderer 使用。
- */
-export function nodePosById(layout: LayoutResult, id: string): NodePos | undefined {
-  return layout.nodes.get(id);
-}

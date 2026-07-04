@@ -1,227 +1,109 @@
 # Local Runner
 
-Run local shell commands from an Obsidian sidebar tab with live, per-process output. Each command gets its own card with a status indicator and expandable log — perfect for keeping `npm run dev` or `npx vite` running while you write notes. **Wikilink inspection is now built into the same view** — no more switching between two sidebar panels.
+**Languages:** [English](README.md) · [简体中文](README.zh-CN.md)
 
-在 Obsidian 侧边栏管理本地 shell 进程并实时查看输出。每个进程一条记录，带状态指示灯、可展开日志，支持命令组快捷填充 —— 适合边写文档边跑 `npm run dev` / `npx vite` / 任意 CLI 工具。**双链检查已融入同一视图**，不再需要在两个侧边栏面板间切换。
+Run local shell commands from an Obsidian sidebar tab and stream their output live, alongside built-in wikilink inspection and a visual repair-history tree. Each command gets its own card with a status indicator and an expandable log — useful for keeping `npm run dev`, `npx vite`, or any CLI tool running while you take notes.
+
+> Desktop only. The plugin spawns child processes through Node's `child_process`, which is unavailable in the Obsidian mobile sandbox.
 
 ## Features
 
-- 🖥️ **Multiple processes in parallel** — run several commands at once, each with its own output panel
-- 🔗 **Unified sidebar view** — wikilink inspection and process management in one pane; action buttons (clear current / clear all unresolved / new process) at the top, quick process start/stop inline
-- 📸 **Per-process snapshot** — toggle "capture wikilink snapshot on start" on a process or a command-group preset; when the process launches the plugin first snapshots all unresolved wikilinks into the repair tree
-- 🌳 **Repair history tree** — a separate pannable / zoomable canvas (`双链树` button) showing every snapshot of unresolved wikilinks across runs; click a node to jump to its source note; auto-tracks the currently open note
-- 📺 **Sidebar integration** — watch logs without leaving Obsidian
-- 🟢 **Status indicator** — running (yellow) / exited ok (green) / exited err (red) at a glance
-- ▶️ **One-click start & stop** — click the process quick-button in the action bar
-- 📝 **Inline form** — create / edit a process (name / command / working directory / snapshot toggle); `Enter` to submit, `Esc` to cancel
-- 🔁 **Live streaming output** — stdout / stderr merged, auto-scroll to bottom
-- 📂 **Expand / collapse** — each process log can be expanded independently
-- 💾 **Persisted** — process configurations, command-group presets, and repair-tree events survive Obsidian restarts
-- 💼 **Keep data on uninstall** — backs up your processes + settings into the vault (outside the plugin directory); reinstalling restores them automatically
-- 🗂️ **Command groups** — define reusable presets in settings; the new-process form offers a dropdown to fill the form with one click
-- 🔧 **Wikilink-repair skill installer** — copy the bundled `obsidian-repair-unresolved-links` skill to your vault's `.claude/skills/` with one toggle
-- 🎨 **Highlighted wikilinks** — give internal `[[]]` links a more readable style
-- 🔗 **Wikilink inspector** — built into the unified sidebar; lists every `[[ ]]` link grouped by resolved / unresolved, newest source-note first, with a full-list modal
-- 🪟 **Windows process tree kill** — `taskkill /T /F` so dev servers don't keep your port
-- 🎯 **ANSI stripped** — output is plain text, capped at 200k chars to bound memory
+### Process management
+- **Parallel processes** — run several commands at once, each with its own output panel.
+- **Quick-launch bar** — one button per command defined in Settings. Click to start, click again to stop. A status dot shows the state: running (yellow), exited with error (red), or idle (gray).
+- **Live streaming output** — stdout and stderr are merged, ANSI escapes are stripped, and the buffer is capped at 200,000 characters to bound memory.
+- **Per-card logs** — click a card in the terminal-output section to expand or collapse its log; drag cards to reorder them.
+- **Windows-aware termination** — stopping a process runs `taskkill /T /F` to kill the whole process tree so a dev server does not keep holding your port; other platforms fall back to `SIGTERM`.
+
+### Wikilink tooling
+- **Unresolved-wikilink list** — the upper section of the sidebar lists every unresolved `[[ ]]` link, newest source note first, with incremental load-more.
+- **Clear unresolved links** — the eraser button converts every unresolved `[[x]]` in the vault to `[x]` after a confirmation prompt. A separate command flattens only the current note's wikilinks.
+- **Snapshot on start** — tick "snapshot unresolved wikilinks on start" on a command; when it launches, the plugin records every currently-unresolved wikilink into the repair tree.
+- **Repair-history tree** — a pannable, zoomable canvas (the **tree** button) visualizes every snapshot. Click a node to jump to its source note; the canvas auto-highlights the note you currently have open.
+- **Highlight wikilinks** — optionally style internal links by resolution state, with configurable colors for resolved and unresolved links in both light and dark themes.
+
+### Data and persistence
+- **Survives restarts and uninstall** — commands, settings, and repair-tree events are persisted. With "keep data on uninstall" enabled (default), a backup is also written into the vault, outside the plugin folder, and restored automatically on reinstall.
+- **Install Claude skills into the vault** — install any skill from a `degit` source (for example `owner/repo/skills/<dir>#main`) into `<vault>/.claude/skills/<name>`, and uninstall it from the same place.
+
+## Requirements
+- **Desktop only.**
+- Obsidian **1.7.2** or newer.
 
 ## Installation
 
-### Option 1: From the Obsidian Community Plugin store (after publication)
+### From the community plugin store (after publication)
+1. Settings → Community plugins → Browse
+2. Search for **Local Runner**
+3. Install, then enable.
 
-1. Open Obsidian → **Settings → Community plugins → Browse**
-2. Search for `Local Runner`
-3. Click **Install**, then **Enable**
-
-### Option 2: From a GitHub Release
-
-1. Download the latest release from the [Releases page](https://github.com/On-DevPlan/ob-ps/releases)
-2. In your vault, create the folder `.obsidian/plugins/local-runner/`
-3. Copy `main.js`, `manifest.json`, and `styles.css` into it (or unzip the release zip)
-4. In Obsidian → **Settings → Community plugins**, reload, and enable **Local Runner**
+### From a GitHub release
+1. Download the latest release from the [Releases page](https://github.com/On-DevPlan/ob-ps/releases).
+2. In your vault, create the folder `.obsidian/plugins/local-runner/`.
+3. Copy `main.js`, `manifest.json`, and `styles.css` into it.
+4. Settings → Community plugins → reload, then enable **Local Runner**.
 
 ## Usage
 
-1. Open the sidebar: command palette (`Ctrl/Cmd + P`) → "Open sidebar", or click the play icon in the left ribbon
-2. Create a process: click **+新建进程** in the action bar, fill in name / command / working directory → `Enter` (or click "Run")
-3. Start / stop a process: click the process **quick-button** in the action bar (second row)
-4. View output: click a process **card** in the terminal output section to expand the log
-5. Clear wikilinks: use **清除当前** or **清除全部** buttons in the action bar
-6. Capture a wikilink snapshot: enable **「启动时拍双链快照」** on the process (in the inline form) or on a command-group preset (in settings); on next launch the plugin records every unresolved wikilink into the repair tree
-7. Quick fill: when creating, pick a group in the "Command group" dropdown, then a preset — the form auto-fills
-8. Open the **wikilink inspector**: built into the unified sidebar; the upper section shows every `[[ ]]` link grouped by resolved / unresolved
-9. Open the **repair history tree**: click the **双链树** button in the action bar; drag to pan, scroll to zoom, double-click to fit, click a node to jump to its source note
+1. **Open the sidebar** — command palette → "Open sidebar", or click the play icon in the left ribbon.
+2. **Add a command** — Settings → Local Runner → Command groups → **+ New**. Fill in a name, the shell command, and optionally a working directory. A quick-launch button for it then appears in the sidebar.
+3. **Start and stop** — click the command's button in the quick-launch bar.
+4. **Read logs** — click the **Log** button to reveal the terminal-output section, then click a process card to expand its log.
+5. **Inspect wikilinks** — the upper section lists unresolved links. Click the eraser to clear all of them across the vault, or use the command palette to flatten the current note's links.
+6. **Capture a snapshot** — tick "snapshot unresolved wikilinks on start" on a command; on the next launch, unresolved links are recorded into the repair tree.
+7. **Open the repair tree** — click the **tree** button. Drag to pan, scroll to zoom, double-click to fit, click a node to jump to its source note.
 
 ## Settings
 
-Open **Settings → Local Runner**:
+Settings → Local Runner:
 
-- **Command groups** — add / remove command-group presets (one preset = one process); each card has its own snapshot toggle
-- **Install wikilink-repair skill** — toggle: install the skill to / remove it from your vault
-- **Highlight wikilinks** — toggle: highlight internal wikilinks in your notes
-- **Keep data on uninstall** — toggle: when on (default), the plugin also writes a backup of your processes + settings into the vault (outside the plugin directory); when you reinstall, it restores automatically. Turning it off deletes the backup.
+- **Install skill from remote repo** — paste a `degit` source (`owner/repo/skills/<dir>#<ref>`) to install a skill into the vault's `.claude/skills/`; remove an installed skill with its per-row button.
+- **Highlight wikilinks** — toggle internal-link highlighting, and pick colors for resolved and unresolved links in light and dark themes.
+- **Keep data on uninstall** — when enabled (default), commands and settings are also backed up into the vault and restored on reinstall; turning it off deletes the existing backup.
+- **Command groups** — manage the quick-launch commands: name, command, working directory, visibility, and the snapshot-on-start toggle.
+
+## Commands
+- **Open sidebar** — reveal the Local Runner panel.
+- **Open settings** — jump straight to the plugin's settings tab.
+- **Flatten current note's wikilinks** — convert every `[[link]]` in the active note to `[link]`.
 
 ## Security
-
-- This plugin launches commands via `child_process.spawn` with `shell: true`, equivalent to typing them in a terminal — pipes, arguments, and shell syntax are all supported
-- **Do not** use it to run untrusted commands or parse untrusted input (same risk as a terminal)
-- The default working directory is the vault root; child processes inherit Obsidian's environment
-- On Windows, stopping a process kills the whole process tree; on other platforms only the direct child receives `SIGTERM`
-
-## Compatibility
-
-- **Desktop only** (depends on Node's `child_process`; mobile sandboxes do not provide it)
-- Obsidian ≥ 1.7.2
+- Commands run through `child_process.spawn` with `shell: true`, equivalent to typing them in a terminal. Pipes, arguments, and shell syntax are all supported.
+- **Do not** use the plugin to run untrusted commands or to parse untrusted input.
+- The default working directory is the vault root; child processes inherit Obsidian's environment.
+- On Windows, stopping a process kills the whole process tree; on other platforms only the direct child receives `SIGTERM`.
 
 ## Development
 
 ```bash
 npm install          # install dependencies
-npm run dev          # watch mode, rebuilds on change
-npm run build        # type check + production build; output = main.js at repo root
-npm run lint         # eslint static check
+npm run dev          # watch mode: rebuild on change and sync to a vault
+npm run build        # type-check + production build (outputs main.js at the repo root)
+npm run lint         # eslint
 npm test             # run the vitest suite once
 npm run test:watch   # vitest in watch mode
 ```
 
-In dev mode, `main.js` / `manifest.json` / `styles.css` and `.claude/skills/obsidian-repair-unresolved-links` are synced to the vault plugin directory for hot reload. Default target is `../<vault>/.obsidian/plugins/local-runner/`. Override with the environment variable:
+In dev mode, `main.js`, `manifest.json`, and `styles.css` are synced into a vault plugin folder for hot reload. Override the target with:
 
 ```bash
 LOCAL_RUNNER_VAULT=/path/to/vault/.obsidian/plugins/local-runner npm run dev
 ```
 
-Production mode only writes to the repo root and lets CI handle packaging.
+Production builds write only to the repo root; release packaging is handled by CI.
 
 ## Release
 
-Fully automated: every push to `main` runs GitHub Actions, which will
+Releases are automated. Every push to `main` triggers GitHub Actions to:
 
-1. Auto-bump the patch version in `manifest.json` and append a matching entry to `versions.json`
-2. Type-check and build
-3. Package `local-runner-<version>.zip` (containing `main.js` / `manifest.json` / `styles.css`)
-4. Commit the version bump (with `[skip ci]` to avoid loops), tag it, and create a GitHub Release
+1. Bump the patch version in `manifest.json` and append a matching entry to `versions.json`.
+2. Type-check and build.
+3. Package `local-runner-<version>.zip` containing `main.js`, `manifest.json`, and `styles.css`.
+4. Attest build provenance for the artifacts.
+5. Commit the version bump with `[skip ci]`, tag it, and publish a GitHub Release.
 
-So for day-to-day development you only need `git push origin main` — no manual version bumps or tags.
-
-> Submitting to the Obsidian community store is a separate step: open a PR against [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) and add an entry to `community-plugins.json`.
+For day-to-day work, `git push origin main` is all you need. Submitting to the Obsidian community store is a separate step: open a PR against [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) and add an entry to `community-plugins.json`.
 
 ## License
 
 ISC — see [LICENSE](LICENSE).
-
-## 功能
-
-**进程管理**
-
-- 🖥️ **多进程并行** — 同一侧边栏同时跑多个命令，各自独立显示输出
-- 🔗 **统一侧边栏视图** — 双链检查与进程管理合并在一个面板；顶栏操作按钮（清除当前 / 清除全部 / 新建进程），第二行进程快捷启停
-- 📸 **进程级快照开关** — 在进程表单或命令组卡片上勾选「启动时拍双链快照」，下次启动时自动把当前所有未解析双链快照到历史树
-- 🌳 **完善历史树** — 独立的可缩放/拖动画布（「双链树」按钮），可视化所有历史快照；点节点跳转到源笔记，自动跟随当前打开笔记
-- 📺 **侧边栏集成** — 不切窗口，Obsidian 内直接看日志
-- 🟢 **状态指示灯** — 运行中（黄）/ 正常退出（绿）/ 异常退出（红）一目了然
-- ▶️ **一键启停** — 点操作区第二行的进程快捷按钮
-- 📝 **内联表单** — 新建 / 编辑进程（名称 / 命令 / 工作目录 / 快照开关），`Enter` 提交、`Esc` 取消
-- 🔁 **实时流式输出** — stdout / stderr 合并实时刷新，自动滚动到底
-- 📂 **展开 / 收起** — 每个进程的输出可独立展开查看
-- 💾 **持久化** — 进程配置、命令组预设、完善历史树事件全部保存，重启 Obsidian 不丢
-- 💼 **卸载保留数据** — 开启后把进程配置与设置额外备份到 vault（独立于插件目录，卸载不被清理），重装自动恢复
-
-**快捷命令组**
-
-- 🗂️ 在设置里定义「命令组」，每条命令一张卡片，可在卡片上独立切换可见性和快照开关
-- ⚡ 新建进程时通过「快捷命令」下拉一键填充，省去重复输入
-
-**附加能力（面向 Claude Code 用户）**
-
-- 🔧 **双链完善 skill 安装** — 一键把插件自带的 `obsidian-repair-unresolved-links` skill 复制到 vault 的 `.claude/skills/`，用于自动补全未解析的 `[[]]` 双链
-- 🎨 **高亮双链样式** — 开启后笔记中的内部双链以更醒目的样式显示
-- 🔗 **双链检查** — 整合在统一侧边栏上半部分，按解析状态列出所有 `[[ ]]` 双链，「查看全部」打开全量 Modal（搜索/筛选）
-
-**底层细节**
-
-- Windows 上终止进程用 `taskkill /T /F` **杀掉整棵进程树**（避免 dev server 占用端口）；其他平台退化为 `SIGTERM`
-- 自动剥离 ANSI 颜色转义，输出缓冲上限 200k 字符（防止长时间运行的服务吃满内存）
-
-## 安装
-
-### 方式 1：从 Obsidian 社区插件市场安装（发布后可用）
-
-1. Obsidian → **Settings → Community plugins → Browse**
-2. 搜索 `Local Runner`
-3. 点击 **Install**，然后 **Enable**
-
-### 方式 2：从 GitHub Release 手动安装
-
-1. 去 [Releases 页面](https://github.com/On-DevPlan/ob-ps/releases) 下载最新版
-2. 在你的 vault 下创建文件夹：`.obsidian/plugins/local-runner/`
-3. 把 `main.js`、`manifest.json`、`styles.css` 三个文件放进去（直接用 Release 里的 zip 解压也行）
-4. Obsidian → **Settings → Community plugins** → 刷新，启用 **Local Runner**
-
-## 使用
-
-1. 打开侧边栏：命令面板（`Ctrl/Cmd + P`）搜 `打开侧边栏`，或点左侧 ribbon 的播放图标
-2. 新建进程：点操作区的 **+新建进程**，填名称 / 命令 / 工作目录 → `Enter`（或点「运行」）
-3. 启停进程：点操作区第二行的进程快捷按钮切换运行 / 停止
-4. 查看日志：点**终端输出**区的进程卡片展开日志
-5. 清除双链：用操作区的 **清除当前** 或 **清除全部** 按钮
-6. 拍双链快照：勾选进程的「启动时拍双链快照」（在新建/编辑表单里）或勾选命令组卡片上的同名开关，下次启动进程时自动把当前所有未解析双链记录到完善历史树
-7. 快捷填充：新建时在「快捷命令」下拉里选预设，表单自动填好
-8. 查看双链：统一侧边栏的上半部分列出所有 `[[ ]]` 双链，按解析状态分组
-9. 打开双链树：点操作区的 **双链树** 按钮，可拖动/缩放浏览所有历史快照，点节点跳转到源笔记
-
-## 设置
-
-打开 **Settings → Local Runner**：
-
-- **命令组管理** — 增删命令组卡片，每条卡片可独立切换可见性和「启动时拍双链快照」开关
-- **添加双链完善 skill** — 开关：把 skill 装到 / 从 vault 移除
-- **高亮双链样式** — 开关：高亮笔记中的内部双链
-- **卸载插件时保留数据** — 开关（默认开启）：开启时把进程配置与设置额外备份到 vault（独立于插件目录），重装自动恢复；关闭会清除已有备份
-
-## 安全提示
-
-- 本插件用 `child_process.spawn`（`shell: true`）启动命令，等价于你在终端里手敲那条命令 —— 支持管道、参数等任意 shell 语法
-- **不要**用它跑来历不明的命令或解析未信任的输入（和终端一样）
-- 工作目录默认为 vault 根目录，子进程继承 Obsidian 的环境变量
-- Windows 终止进程会杀掉整棵进程树（含派生子进程）；其他平台仅向直接子进程发 `SIGTERM`
-
-## 兼容性
-
-- **仅桌面端**（依赖 Node 的 `child_process`，移动端沙箱不支持）
-- Obsidian ≥ 1.7.2
-
-## 开发
-
-```bash
-npm install          # 装依赖
-npm run dev          # 监听模式，改完自动重建
-npm run build        # 类型检查 + 生产构建，产物 = 根目录 main.js
-npm run lint         # eslint 静态检查
-npm test             # 跑一次 vitest 全量测试
-npm run test:watch   # vitest 监听模式
-```
-
-dev 模式会把 `main.js` / `manifest.json` / `styles.css` 以及 `.claude/skills/obsidian-repair-unresolved-links` 同步到 vault 插件目录，方便热加载。默认目标为 `../<vault>/.obsidian/plugins/local-runner/`，可用环境变量覆盖：
-
-```bash
-LOCAL_RUNNER_VAULT=/path/to/vault/.obsidian/plugins/local-runner npm run dev
-```
-
-prod 模式只输出到源码根目录，由 CI 打包发布。
-
-## 发布流程
-
-发布全自动：每次 push 到 `main`，GitHub Actions 会：
-
-1. 自动递增 `manifest.json` 的 patch 版本，并在 `versions.json` 追加一条版本映射
-2. 类型检查 + 构建
-3. 打包 `local-runner-<version>.zip`（含 `main.js` / `manifest.json` / `styles.css`）
-4. 提交版本号（带 `[skip ci]` 防循环）、打 tag、创建 GitHub Release
-
-所以日常开发只需 `git push origin main`，无需手动改版本号或打 tag。
-
-> 提交到 Obsidian 社区市场是另一回事：首次发布需去 [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) 开 PR，在 `community-plugins.json` 加一条。
-
-## 许可
-
-ISC — 见 [LICENSE](LICENSE)。

@@ -16,13 +16,6 @@ export interface RunnerHost {
   findTabByCommand(command: string): RunnerTab | null;
 }
 
-/** 修复未解析双链进程标签页的显示名称 */
-export const REPAIR_UNRESOLVED_LINKS_TAB_NAME = "修复未解析双链";
-
-/** 修复未解析双链进程标签页的 shell 命令 */
-export const REPAIR_UNRESOLVED_LINKS_COMMAND =
-  'claude --dangerously-skip-permissions -p "/obsidian-repair-unresolved-links"';
-
 /**
  * 在已有 tabs 中查找同名 command;若不存在则创建新 tab。
  * 纯函数 —— 不修改入参数组,便于单测。

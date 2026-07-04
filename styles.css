@@ -698,26 +698,41 @@
  * 控制 body class: .ob-ps-hl-wl
  * ========================================================================== */
 
-/* 配色:亮色主题 */
+/* 配色 —— fg 为运行时 inline <style> 覆盖的兜底;bg / hover-bg 由 fg 派生 */
 body.ob-ps-hl-wl {
-  --ob-wl-resolved-bg: rgba(22, 163, 74, 0.14);
-  --ob-wl-resolved-bg-hi: rgba(22, 163, 74, 0.24);
-  --ob-wl-resolved-fg: #15803d;
-  --ob-wl-unresolved-bg: rgba(59, 130, 246, 0.13);
-  --ob-wl-unresolved-bg-hi: rgba(59, 130, 246, 0.22);
+  --ob-wl-resolved-fg: #15803d;            /* fallback:用户未配置时使用 */
+  --ob-wl-resolved-fg-rgb: 21 128 61;
   --ob-wl-unresolved-fg: #1d4ed8;
+  --ob-wl-unresolved-fg-rgb: 29 78 216;
+
+  --ob-wl-resolved-bg:    rgba(var(--ob-wl-resolved-fg-rgb), 0.14);
+  --ob-wl-resolved-bg-hi: rgba(var(--ob-wl-resolved-fg-rgb), 0.24);
+  --ob-wl-unresolved-bg:  rgba(var(--ob-wl-unresolved-fg-rgb), 0.13);
+  --ob-wl-unresolved-bg-hi: rgba(var(--ob-wl-unresolved-fg-rgb), 0.22);
+
   --link-unresolved-color: var(--ob-wl-unresolved-fg);
   --link-external-color: var(--ob-wl-unresolved-fg);
 }
 
 body.ob-ps-hl-wl.theme-dark {
-  --ob-wl-resolved-bg: rgba(74, 222, 128, 0.16);
-  --ob-wl-resolved-bg-hi: rgba(74, 222, 128, 0.26);
-  --ob-wl-resolved-fg: #86efac;
-  --ob-wl-unresolved-bg: rgba(96, 165, 250, 0.16);
-  --ob-wl-unresolved-bg-hi: rgba(96, 165, 250, 0.26);
+  --ob-wl-resolved-fg: #86efac;            /* fallback:用户未配置时使用 */
+  --ob-wl-resolved-fg-rgb: 134 239 172;
   --ob-wl-unresolved-fg: #93c5fd;
+  --ob-wl-unresolved-fg-rgb: 147 197 253;
+
   --link-unresolved-color: var(--ob-wl-unresolved-fg);
+}
+
+/* 设置面板中两个 ColorPicker 旁的 16×16 预览色块 */
+.ob-ps-color-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  background: transparent;
+  vertical-align: middle;
 }
 
 /* ---- Reading View ---- */
@@ -801,11 +816,11 @@ body.ob-ps-hl-wl .cm-active .cm-hmd-internal-link .is-unresolved .cm-underline {
 body.ob-ps-hl-wl .cm-hmd-internal-link .cm-link {
   color: var(--ob-wl-unresolved-fg);
 }
-body.ob-ps-hl-wl .cm-hmd-barelink.cm-link {
-  color: var(--ob-wl-unresolved-fg) !important;
+body.ob-ps-hl-wl.ob-ps-hl-wl .cm-hmd-barelink.cm-link {
+  color: var(--ob-wl-unresolved-fg);
 }
-body.ob-ps-hl-wl .cm-s-obsidian span.cm-hmd-barelink.cm-link {
-  color: var(--ob-wl-unresolved-fg) !important;
+body.ob-ps-hl-wl.ob-ps-hl-wl .cm-s-obsidian span.cm-hmd-barelink.cm-link {
+  color: var(--ob-wl-unresolved-fg);
 }
 
 /* ===== Wikilink Inspector Modal & Shared Components ===== */

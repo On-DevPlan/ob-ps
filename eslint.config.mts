@@ -36,4 +36,13 @@ export default tseslint.config(
 	},
 	// Obsidian 官方推荐规则集(API 用法、内部访问等约束)
 	...obsidianmd.configs.recommended,
+	// 测试/桩文件豁免 obsidian 窗口兼容规则(jsdom 无 activeDocument/activeWindow)。
+	// 用 config 级 override 代替逐文件 eslint-disable —— shipped 源码仍全量受约束。
+	{
+		files: ['**/*.test.ts', '__mocks__/**/*.ts'],
+		rules: {
+			'obsidianmd/no-global-this': 'off',
+			'obsidianmd/prefer-active-doc': 'off',
+		},
+	},
 );

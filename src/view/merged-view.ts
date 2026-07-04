@@ -2,7 +2,6 @@ import { ItemView, MarkdownView, Notice, setIcon, TFile, WorkspaceLeaf } from "o
 import type { ProcessConfig } from "../types/process";
 import type { CommandGroup } from "../types/commands";
 import type { PluginSettings } from "../types/settings";
-import { nextGroupId } from "../settings-tab/group-id";
 import {
   isRunning,
   resolveOrCreateTab,
@@ -16,13 +15,7 @@ import { partitionByState, type LinkRow } from "../wikilink-inspector/link-row";
 import { renderInspectorRow } from "../wikilink-inspector/inspector-render";
 import { ClearUnresolvedConfirmModal } from "../wikilink-inspector/clear-unresolved-modal";
 import { makeUnresolvedSource } from "../wikilink-inspector/clear-unresolved";
-import { ConfirmModal } from "./confirm-modal";
-import {
-  renderProcessForm,
-  type FormMode,
-  type FormPrefill,
-  type FormSubmitResult,
-} from "./process-form";
+import { type FormMode } from "./process-form";
 import { TreeLinkView } from "../link-tree/link-tree-view";
 import type { CreationEvent } from "../link-tree/creation-event";
 
@@ -86,7 +79,6 @@ export class MergedRunnerInspectorView extends ItemView {
   private procCollapsed = false;
   private logSectionVisible = false;
   private logBtnEl!: HTMLElement;
-  private formEl!: HTMLElement;
   /** 完善历史树 —— 链接历史可视化 */
   private treeView!: TreeLinkView;
   private treeContainerEl!: HTMLElement;
@@ -186,7 +178,59 @@ export class MergedRunnerInspectorView extends ItemView {
   /** 设置 tab 改动 commandGroups 后调用,让侧边栏快速按钮栏重建 */
   notifyCommandGroupsChanged(): void {
     if (!this.procBtnGridEl) return; // view 还没 buildUi(onOpen 之前)
+    this.syncTabsWithCommandGroups();
     this.refreshQuickBar();
+  }
+
+  /**
+   * 把 tabs 与 commandGroups(visible:true)双向同步:
+   *
+   * 1. 删除:tab 对应的 command 已不在任何 visible:true 命令组中 → 终止并移除
+   * 2. 同步字段:从第一个可见命令组复制 name / cwd / snapshotEnabled 到 tab
+   *    - cwd 改了不重启子进程(下次启动生效)
+   *    - snapshotEnabled 仅改字段,运行中的进程不变
+   *    - name 仅改字段,UI 跟随重渲染
+   *
+   * 注:同一 command 可能出现在多个命令组中(数据模型允许);这里以"任一可见
+   * 命令组救活 tab + 取第一个可见命令组的字段"为准,与 pruneOrphanTabs 用
+   * command 作 key 的旧语义保持一致。
+   */
+  private syncTabsWithCommandGroups(): void {
+    const groups = this.opts.settings.commandGroups ?? [];
+    const visibleCmds = new Set(groups.filter((g) => g.visible !== false).map((g) => g.command));
+    const firstVisibleByCommand = new Map<string, CommandGroup>();
+    for (const g of groups) {
+      if (g.visible === false) continue;
+      if (!firstVisibleByCommand.has(g.command)) {
+        firstVisibleByCommand.set(g.command, g);
+      }
+    }
+
+    // 1) 删除:command 已不在可见命令组中的 tab
+    const orphans = this.tabs.filter((t) => !visibleCmds.has(t.command));
+    if (orphans.length > 0) {
+      const orphanIds = new Set(orphans.map((t) => t.id));
+      for (const tab of orphans) {
+        if (tab.child) {
+          stopProcess(tab, (kind) => this.onProcChange(tab.id, kind));
+        }
+        this.expandedIds.delete(tab.id);
+        this.outputElMap.delete(tab.id);
+      }
+      this.tabs = this.tabs.filter((t) => !orphanIds.has(t.id));
+    }
+
+    // 2) 同步字段:每个保留 tab 从对应可见命令组拉 name / cwd / snapshotEnabled
+    for (const tab of this.tabs) {
+      const g = firstVisibleByCommand.get(tab.command);
+      if (!g) continue; // 上面已过滤,这里不该发生,但防御性兜底
+      tab.name = g.name;
+      tab.cwd = g.cwd;
+      tab.snapshotEnabled = g.snapshotEnabled ?? false;
+    }
+
+    this.saveConfigs();
+    this.renderProcAll();
   }
 
   setTabsFromConfigs(configs: ProcessConfig[]): void {
@@ -282,9 +326,6 @@ export class MergedRunnerInspectorView extends ItemView {
     this.treeToggleBtnEl.createSpan({ text: "双链树" });
     this.treeToggleBtnEl.addEventListener("click", () => this.toggleTreeContainer());
 
-    // ③ Form container (beneath zones)
-    this.formEl = root.createDiv({ cls: "merged-form-container" });
-
     // ===== Zone 2: 双链检查 (fills remaining space) =====
     this.wliZoneEl = root.createDiv({ cls: "merged-zone merged-zone-wli" });
     this.buildWliSection();
@@ -309,7 +350,6 @@ export class MergedRunnerInspectorView extends ItemView {
       const tab = this.tabs.find((t) => t.command === group.command);
       this.appendQuickBtn(
         group.name,
-        group.command,
         tab
           ? () => {
             // 更新 tab 的快照标记(命令组可能已变)
@@ -325,7 +365,6 @@ export class MergedRunnerInspectorView extends ItemView {
   /** 渲染单个进程快捷按钮 */
   private appendQuickBtn(
     name: string,
-    command: string,
     onClick: () => void,
     tab?: RunnerTab | null,
   ): void {
@@ -798,128 +837,6 @@ export class MergedRunnerInspectorView extends ItemView {
       this._incSnapshotRef(tab.id, tab.name);
     }
     startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
-  }
-
-  // ---- 删除进程 --------------------------------------------------------------
-
-  private deleteProcess(id: string): void {
-    const tab = this.tabs.find((t) => t.id === id);
-    if (!tab) return;
-    new ConfirmModal(this.app, `确认删除进程「${tab.name}」？`, () => {
-      this.doDeleteProcess(id);
-    }).open();
-  }
-
-  private doDeleteProcess(id: string): void {
-    const idx = this.tabs.findIndex((t) => t.id === id);
-    if (idx === -1) return;
-    if (this.formMode === "edit" && this.editingTabId === id) {
-      this.clearForm();
-    }
-    const tab = this.tabs[idx];
-    if (tab.child) {
-      stopProcess(tab, (kind) => this.onProcChange(tab.id, kind));
-    }
-    this.tabs.splice(idx, 1);
-    this.expandedIds.delete(id);
-    this.outputElMap.delete(id);
-    this.saveConfigs();
-    this.renderProcAll();
-  }
-
-  // ---- 内联表单(编辑进程) -----------------------------------------------
-
-  private showEditForm(tab: RunnerTab): void {
-    if (this.formMode) return;
-    this.formMode = "edit";
-    this.editingTabId = tab.id;
-    this.renderForm();
-    this.renderProcAll();
-  }
-
-  private clearForm(): void {
-    this.formMode = null;
-    this.editingTabId = null;
-    this.formEl.empty();
-    this.renderProcAll();
-  }
-
-  private renderForm(): void {
-    if (!this.formMode) return;
-    const isEdit = this.formMode === "edit";
-    const editingTab = isEdit && this.editingTabId
-      ? this.tabs.find((t) => t.id === this.editingTabId) ?? null
-      : null;
-
-    const prefill: FormPrefill = {
-      name: editingTab?.name ?? "",
-      command: editingTab?.command ?? "",
-      cwd: editingTab?.cwd ?? this.opts.defaultCwd,
-      snapshotEnabled: editingTab?.snapshotEnabled ?? false,
-    };
-
-    renderProcessForm(this.formEl, {
-      mode: this.formMode,
-      editingTab,
-      prefill,
-      commandGroups: this.opts.settings.commandGroups ?? [],
-      defaultCwd: this.opts.defaultCwd,
-      onSubmit: (result) => { void this.handleFormSubmit(result); },
-      onSaveToGroup: (entry) => this.handleSaveToGroup(entry),
-    });
-  }
-
-  private async handleFormSubmit(result: FormSubmitResult): Promise<void> {
-    if (result.kind === "cancel") {
-      this.clearForm();
-      return;
-    }
-    if (result.kind === "edit") {
-      this.saveConfigs();
-      this.renderProcAll();
-      this.clearForm();
-      return;
-    }
-    // add
-    this.tabs.push(result.tab);
-    if (result.autostart) {
-      if (result.tab.snapshotEnabled) {
-        try {
-          await this.opts.onProcessStart?.(result.tab);
-        } catch (e) {
-          console.warn("[link-tree] onProcessStart snapshot failed", e);
-        }
-        this._incSnapshotRef(result.tab.id, result.tab.name);
-      }
-      startProcess(result.tab, (kind) => this.onProcChange(result.tab.id, kind));
-    }
-    this.expandedIds.add(result.tab.id);
-    this.expandScrollId = result.tab.id;
-    this.saveConfigs();
-    this.renderProcAll();
-    this.clearForm();
-  }
-
-  private handleSaveToGroup(entry: { name: string; command: string; cwd: string }): void {
-    const groups = this.opts.settings.commandGroups ?? [];
-    const cmd = entry.command.trim();
-    const dup = groups.find((g) => g.command.trim() === cmd);
-    if (dup) {
-      new Notice(`命令组「${dup.name}」已存在该命令,未重复添加`);
-      return;
-    }
-    const next: CommandGroup[] = [
-      ...groups,
-      {
-        id: nextGroupId(),
-        name: entry.name.trim(),
-        command: cmd,
-        cwd: entry.cwd.trim(),
-      },
-    ];
-    this.opts.settings.commandGroups = next;
-    this.opts.onSaveCommandGroups(next);
-    new Notice(`已加入命令组「${entry.name}」`);
   }
 
   // ---- 辅助方法 --------------------------------------------------------------
