@@ -25,6 +25,7 @@ interface CapturableSetting {
     cta: boolean;
     warning: boolean;
     fire: () => void;
+    buttonEl: { classes: string[] };
   }[];
   resetCapture(): void;
 }
