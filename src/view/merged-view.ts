@@ -11,7 +11,7 @@ import {
   stopProcess,
 } from "../runner";
 import { collectRows } from "../wikilink-inspector/link-collector";
-import { partitionByState, type LinkRow } from "../wikilink-inspector/link-row";
+import { partitionByState, dedupeRowsByTarget, type LinkRow } from "../wikilink-inspector/link-row";
 import { renderInspectorRow } from "../wikilink-inspector/inspector-render";
 import { ClearUnresolvedConfirmModal } from "../wikilink-inspector/clear-unresolved-modal";
 import { makeUnresolvedSource } from "../wikilink-inspector/clear-unresolved";
@@ -73,6 +73,10 @@ export class MergedRunnerInspectorView extends ItemView {
   private wliBodyEl!: HTMLElement;
   private wliChevronEl!: HTMLElement;
   private wliCollapsed = false;
+  private wliResolvedZoneEl!: HTMLElement;
+  private wliResolvedBodyEl!: HTMLElement;
+  private wliResolvedChevronEl!: HTMLElement;
+  private wliResolvedCollapsed = false;
   private procZoneEl!: HTMLElement;
   private procBodyEl!: HTMLElement;
   private procChevronEl!: HTMLElement;
@@ -330,6 +334,10 @@ export class MergedRunnerInspectorView extends ItemView {
     this.wliZoneEl = root.createDiv({ cls: "merged-zone merged-zone-wli" });
     this.buildWliSection();
 
+    // ===== Zone 2.5: 最新已解析双链 (有界,不抢 flex 空间) =====
+    this.wliResolvedZoneEl = root.createDiv({ cls: "merged-zone merged-zone-wli-resolved" });
+    this.buildResolvedSection();
+
     // ===== Zone 3: 终端输出 (hidden by default) =====
     this.procZoneEl = root.createDiv({ cls: "merged-zone merged-zone-proc is-collapsed" });
     this.buildProcSection();
@@ -425,9 +433,28 @@ export class MergedRunnerInspectorView extends ItemView {
     });
   }
 
+  /** 构建「最新已解析双链」折叠区块(仿 buildWliSection,无 action 按钮/无 tree) */
+  private buildResolvedSection(): void {
+    const head = this.wliResolvedZoneEl.createDiv({ cls: "zone-head" });
+    const chevron = head.createDiv({ cls: "zone-head-cv" });
+    setIcon(chevron, "chevron-down");
+    head.createSpan({ cls: "zone-head-title", text: "最新已解析双链" });
+    this.wliResolvedChevronEl = chevron;
+
+    this.wliResolvedBodyEl = this.wliResolvedZoneEl.createDiv({ cls: "zone-wli-body" });
+
+    head.addEventListener("click", () => {
+      this.wliResolvedCollapsed = !this.wliResolvedCollapsed;
+      setIcon(this.wliResolvedChevronEl, this.wliResolvedCollapsed ? "chevron-right" : "chevron-down");
+      this.wliResolvedBodyEl.toggleClass("is-collapsed", this.wliResolvedCollapsed);
+      this.wliResolvedZoneEl.toggleClass("is-shrunk", this.wliResolvedCollapsed);
+    });
+  }
+
   private refreshWli(): void {
     this.rows = collectRows(makeSource(this.app));
     this.renderWliAll();
+    this.renderResolvedAll();
     // 完善历史树:有事件或已挂载则更新
     try {
       const events = this.opts.getLinkTreeEvents();
@@ -636,6 +663,39 @@ export class MergedRunnerInspectorView extends ItemView {
     }
     // 树容器追加到 WLI 列表下方
     if (treeEl) this.wliBodyEl.appendChild(treeEl);
+  }
+
+  /** 渲染「最新已解析双链」:按目标去重 → 取前 N(设置项) */
+  private renderResolvedAll(): void {
+    if (!this.wliResolvedBodyEl) return;
+    this.wliResolvedBodyEl.empty();
+
+    const { resolved } = partitionByState(this.rows);
+    const deduped = dedupeRowsByTarget(resolved);
+    const n = this.opts.settings.resolvedRecentLimit ?? 10;
+    const shown = deduped.slice(0, n);
+
+    const titleEl = this.wliResolvedZoneEl.querySelector(".zone-head-title");
+    if (titleEl) {
+      titleEl.setText(`最新已解析双链 (${shown.length}/${deduped.length})`);
+    }
+
+    if (shown.length === 0) {
+      this.wliResolvedBodyEl.createDiv({
+        cls: "wli-empty",
+        text: "暂无已解析双链",
+      });
+      return;
+    }
+
+    for (const r of shown) {
+      renderInspectorRow(this.wliResolvedBodyEl, r, (row) => void this.openSource(row));
+    }
+  }
+
+  /** 设置页改动「最新已解析双链数量」后调用:view 已 build 时即时重渲 */
+  notifyResolvedLimitChanged(): void {
+    this.renderResolvedAll();
   }
 
   // ---- 进程日志 Section ------------------------------------------------------

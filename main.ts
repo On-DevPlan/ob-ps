@@ -244,6 +244,17 @@ export default class LocalRunnerPlugin extends Plugin {
     }
   }
 
+  /** 设置 tab 改动「最新已解析双链数量」后调用:通知已打开的 merged-view 重渲该区块。
+   * 仅在 view 已存在时通知,不强行弹出侧边栏。
+   */
+  notifyResolvedLimitChanged(): void {
+    const leaf = this.app.workspace.getLeavesOfType(MERGED_VIEW_TYPE)[0];
+    const view = leaf?.view;
+    if (view instanceof MergedRunnerInspectorView) {
+      view.notifyResolvedLimitChanged();
+    }
+  }
+
   /** 根据设置开关添加/移除高亮双链 body class */
   applyWikilinkStyle(): void {
     applyWikilinkStyle(this.settings);

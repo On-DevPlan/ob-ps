@@ -3,6 +3,7 @@ import type { PluginSettings } from "../types/settings";
 import * as sectionSkills from "./section-skills";
 import * as sectionWikilink from "./section-wikilink";
 import * as sectionKeepData from "./section-keep-data";
+import * as sectionResolvedRecent from "./section-resolved-recent";
 import * as sectionCommandGroups from "./section-command-groups";
 import type { CommandGroup } from "../types/commands";
 
@@ -26,6 +27,8 @@ export interface SettingTabHost {
   applyWikilinkStyle(): void;
   /** 命令组变更后通知侧边栏视图(可选,缺失则只持久化不热更新) */
   notifyCommandGroupsChanged?: () => void;
+  /** 「最新已解析双链」条数变更后通知侧边栏视图重渲(可选) */
+  notifyResolvedLimitChanged?: () => void;
 }
 
 /**
@@ -71,6 +74,11 @@ export class LocalRunnerSettingTab extends PluginSettingTab {
     sectionKeepData.render(containerEl, {
       settings: host.settings,
       saveSettings: () => host.saveSettings(),
+    });
+    sectionResolvedRecent.render(containerEl, {
+      settings: host.settings,
+      saveSettings: () => host.saveSettings(),
+      notifyResolvedLimitChanged: () => host.notifyResolvedLimitChanged?.(),
     });
 
     // 底部:命令组管理
