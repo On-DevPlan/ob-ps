@@ -58,6 +58,7 @@ function makeSettings(
     installedSkills: [] as InstalledSkill[],
     highlightWikilinks: false,
     keepDataOnUninstall: true,
+    resolvedRecentLimit: 10,
     commandGroups: [],
     ...overrides,
   };

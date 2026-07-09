@@ -91,6 +91,15 @@
 .merged-zone-wli.is-shrunk {
   flex: none;
 }
+/* Zone 2.5: 最新已解析双链 — 有界高度,不与未解析区块争 flex 空间 */
+.merged-zone-wli-resolved {
+  flex: none;
+  max-height: 38%;
+  gap: 2px;
+}
+.merged-zone-wli-resolved.is-shrunk {
+  flex: none;
+}
 /* Zone 3: proc — fills remaining space when visible */
 .merged-zone-proc {
   flex: 1 1 0;
@@ -318,6 +327,12 @@
 }
 .theme-dark .wli-dot.is-unresolved {
   background: #60a5fa;
+}
+.wli-dot.is-resolved {
+  background: #15803d;
+}
+.theme-dark .wli-dot.is-resolved {
+  background: #86efac;
 }
 .wli-target {
   font-weight: 500;

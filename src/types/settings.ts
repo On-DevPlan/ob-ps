@@ -20,6 +20,8 @@ export interface PluginSettings {
   highlightWikilinksUnresolvedFgDark?: string;
   /** 卸载/删除插件时是否保留持久化数据 */
   keepDataOnUninstall: boolean;
+  /** 侧边栏「最新已解析双链」区块显示的条数（按目标去重、按创建时间倒序） */
+  resolvedRecentLimit: number;
   /** 用户定义的命令组,用于快捷填充新建表单 */
   commandGroups: CommandGroup[];
 }
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   highlightWikilinks: false,
   // 4 个 fg 字段默认 undefined:首次打开 settings tab 时再写入
   keepDataOnUninstall: true,
+  resolvedRecentLimit: 10,
   commandGroups: [],
 };
 
