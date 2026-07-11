@@ -34,8 +34,16 @@ export interface RunnerTab {
    * 避免在用户「点停-点启」竞态下旧进程污染新进程的状态。
    */
   generation: number;
-  /** 启动时是否拍双链快照(从 ProcessConfig.snapshotEnabled 继承) */
-  snapshotEnabled?: boolean;
+  /**
+   * 进程成功退出后,自动重新扫描启动时记录的活动笔记的双链树。
+   * 默认 false(显式 opt-in)。
+   */
+  rescanOnExit?: boolean;
+  /**
+   * 进程启动时记录的活动笔记路径,rescanOnExit 触发时扫描这个笔记。
+   * 避免进程跑完时用户已切到别的笔记导致扫错对象。
+   */
+  rescanTargetPath?: string;
 }
 
 /** 是否正在运行(子进程存在且状态为 running) */

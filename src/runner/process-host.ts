@@ -7,7 +7,7 @@ export interface RunnerHost {
    * 若 command 已存在则复用并启动;否则新建标签页并启动。
    * 不切换视图、不弹出 UI。
    */
-  startOrCreateTab(name: string, command: string, cwd: string): RunnerTab;
+  startOrCreateTab(name: string, command: string, cwd: string, rescanOnExit?: boolean): RunnerTab;
 
   /**
    * 按 command 查找已有标签页;不存在返回 null。
@@ -25,10 +25,11 @@ export function resolveOrCreateTab(
   name: string,
   command: string,
   cwd: string,
+  rescanOnExit = false,
 ): { tab: RunnerTab; created: boolean } {
   const existing = tabs.find((t) => t.command === command);
   if (existing) {
     return { tab: existing, created: false };
   }
-  return { tab: createTab(name, command, cwd), created: true };
+  return { tab: createTab(name, command, cwd, rescanOnExit), created: true };
 }

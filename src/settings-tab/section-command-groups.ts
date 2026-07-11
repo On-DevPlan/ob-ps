@@ -135,19 +135,20 @@ export function render(
       commit();
     });
 
-    // 启动时拍双链快照
-    const snapRow = card.createDiv({ cls: "cg-card-row is-check" });
-    const snapCheck = snapRow.createEl("input", {
-      attr: { type: "checkbox", id: `snap-${group.id}` },
+    // 进程退出后自动重新扫描活动笔记的双链树
+    // (用途:dev server 跑完后,捕获新创建的笔记,刷新树)
+    const rescanRow = card.createDiv({ cls: "cg-card-row is-check" });
+    const rescanCheck = rescanRow.createEl("input", {
+      attr: { type: "checkbox", id: `rescan-${group.id}` },
     });
-    snapCheck.checked = group.snapshotEnabled ?? false;
-    snapCheck.addEventListener("change", () => {
-      group.snapshotEnabled = snapCheck.checked;
+    rescanCheck.checked = group.rescanOnExit ?? false;
+    rescanCheck.addEventListener("change", () => {
+      group.rescanOnExit = rescanCheck.checked;
       commit();
     });
-    snapRow.createEl("label", {
-      attr: { for: `snap-${group.id}` },
-      text: "启动时拍双链快照",
+    rescanRow.createEl("label", {
+      attr: { for: `rescan-${group.id}` },
+      text: "进程退出后自动重新扫描",
     });
   }
 }

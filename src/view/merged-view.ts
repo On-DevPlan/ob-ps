@@ -17,7 +17,9 @@ import { ClearUnresolvedConfirmModal } from "../wikilink-inspector/clear-unresol
 import { makeUnresolvedSource } from "../wikilink-inspector/clear-unresolved";
 import { type FormMode } from "./process-form";
 import { TreeLinkView } from "../link-tree/link-tree-view";
+import { filterByActiveNote } from "../link-tree/link-tree-view";
 import type { CreationEvent } from "../link-tree/creation-event";
+import { applyTreeZoneVisibility } from "./tree-zone-visibility";
 
 export const MERGED_VIEW_TYPE = "merged-runner-inspector-view";
 
@@ -31,16 +33,25 @@ export interface MergedViewOptions {
   onSaveCommandGroups: (groups: CommandGroup[]) => void;
   /** 返回当前 linkTree 事件列表（由 main.ts 在捕获后更新） */
   getLinkTreeEvents: () => CreationEvent[];
+  /** 用户点击 tree scan 按钮时调用,触发 vault 扫描 */
+  onTreeScan?: (activeNotePath: string) => Promise<void>;
+  /** 当前 active note 的 topicRoot 折叠状态（持久化） */
+  getCollapsed?: () => string[];
+  /** 折叠状态变化时通知 main.ts 持久化 */
+  onCollapsedChange?: (topicRoot: string, collapsed: string[]) => void;
   /**
-   * 进程启动前回调。若 tab.snapshotEnabled 为真,main.ts 在此拍双链快照。
-   * 返回 Promise<void>;view 在 await 完成后再 startProcess。
+   * 进程成功退出 + 启用了 rescanOnExit 时,通知 main.ts 重新扫描。
+   * tab 含 rescanOnExit + rescanTargetPath 字段。
    */
-  onProcessStart?: (tab: RunnerTab) => Promise<void> | void;
+  onProcessExit?: (tab: RunnerTab) => void | Promise<void>;
 }
 
 // makeSource 已抽到 wikilink-inspector/link-source(便于 link-tree 复用,避免反向依赖 view)
 import { makeSource } from "../wikilink-inspector/link-source";
 export { makeSource };
+
+// buildBklinkGraph 在每次 filter 调用前重建一次(vault 规模小,O(V+E) < 1ms)
+import { buildBklinkGraph } from "../link-tree/topic-resolver";
 
 export class MergedRunnerInspectorView extends ItemView {
   // WLI state
@@ -73,10 +84,6 @@ export class MergedRunnerInspectorView extends ItemView {
   private wliBodyEl!: HTMLElement;
   private wliChevronEl!: HTMLElement;
   private wliCollapsed = false;
-  private wliResolvedZoneEl!: HTMLElement;
-  private wliResolvedBodyEl!: HTMLElement;
-  private wliResolvedChevronEl!: HTMLElement;
-  private wliResolvedCollapsed = false;
   private procZoneEl!: HTMLElement;
   private procBodyEl!: HTMLElement;
   private procChevronEl!: HTMLElement;
@@ -85,39 +92,41 @@ export class MergedRunnerInspectorView extends ItemView {
   private logBtnEl!: HTMLElement;
   /** 完善历史树 —— 链接历史可视化 */
   private treeView!: TreeLinkView;
+  private treeZoneEl!: HTMLElement;
+  private treeBodyEl!: HTMLElement;
   private treeContainerEl!: HTMLElement;
+  private treeLoadingEl!: HTMLElement;
   private treeContainerVisible = false;
   private treeToggleBtnEl!: HTMLElement;
-
-  /**
-   * snapshot 监听器引用计数。
-   * 每启动一个 snapshotEnabled 进程 +1,进程退出 -1。
-   * refCount > 0 时注册一个 metadataCache.on("resolved") 监听器;
-   * refCount === 0 时注销该监听器。
-   * _snapshotActiveTabs 确保退出回调幂等(同一 tab 不重复减)。
-   */
-  private _snapshotRefCount = 0;
-  private _snapshotEventRef: ReturnType<typeof this.app.metadataCache.on> | null = null;
-  private _snapshotActiveTabs = new Set<string>();
+  private treeScanBtnEl!: HTMLElement;
 
   constructor(leaf: WorkspaceLeaf, opts: MergedViewOptions) {
     super(leaf);
     this.opts = opts;
-    this.treeView = new TreeLinkView((event) => {
-      // 跳转到源文件
-      void this.openSource({
-        sourcePath: event.sourcePath,
-        position: event.position,
-        target: event.target,
-        state: "resolved",
-        sourceCtime: event.firstSeenAt,
-      });
-      // WLI 列表走 400ms 防抖(重算行成本高)
-      this.scheduleWliRefresh();
-      // 树立刻更新(不防抖),立刻高亮 + 动画到源文件节点
-      const newActive = this.getActiveNotePath();
-      this.treeView.updateFromApp(this.opts.getLinkTreeEvents(), this.app, newActive);
-    });
+    this.treeView = new TreeLinkView(
+      (event) => {
+        // 跳转到目标笔记（event.target），不是 bklink 前置（event.sourcePath）
+        void this.openSource({
+          sourcePath: this.findBasenamePath(event.target) ?? event.sourcePath,
+          position: event.position,
+          target: event.target,
+          state: "resolved",
+          sourceCtime: event.firstSeenAt,
+        });
+        // WLI 列表走 400ms 防抖(重算行成本高)
+        this.scheduleWliRefresh();
+        // 树立刻更新(不防抖),立刻高亮 + 动画到源文件节点
+        const newActive = this.getActiveNotePath();
+        const treeGraph = buildBklinkGraph(this.app);
+        const treeEvents = filterByActiveNote(this.opts.getLinkTreeEvents(), newActive, treeGraph);
+        this.treeView.updateFromApp(treeEvents, this.app, newActive);
+      },
+      {
+        // 折叠状态:从 opts.getCollapsed 获取,变化时通过 opts.onCollapsedChange 持久化
+        initialCollapsed: opts.getCollapsed ? opts.getCollapsed() : undefined,
+        onCollapsedChange: opts.onCollapsedChange,
+      },
+    );
   }
 
   getViewType(): string {
@@ -138,7 +147,9 @@ export class MergedRunnerInspectorView extends ItemView {
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         const newActive = this.getActiveNotePath();
-        this.treeView.updateFromApp(this.opts.getLinkTreeEvents(), this.app, newActive);
+        const treeGraph = buildBklinkGraph(this.app);
+        const treeEvents = filterByActiveNote(this.opts.getLinkTreeEvents(), newActive, treeGraph);
+        this.treeView.updateFromApp(treeEvents, this.app, newActive);
       }),
     );
     // WLI 列表热刷新：vault 中任何 .md 完成链接解析(新建/修改) → 重算 unresolved。
@@ -161,13 +172,6 @@ export class MergedRunnerInspectorView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // 清理 snapshot 监听器(进程退出前 close view 的兜底)
-    if (this._snapshotEventRef) {
-      this.app.metadataCache.offref(this._snapshotEventRef);
-      this._snapshotEventRef = null;
-      this._snapshotRefCount = 0;
-      this._snapshotActiveTabs.clear();
-    }
     if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
     for (const tab of this.tabs) {
       if (tab.child) {
@@ -190,9 +194,8 @@ export class MergedRunnerInspectorView extends ItemView {
    * 把 tabs 与 commandGroups(visible:true)双向同步:
    *
    * 1. 删除:tab 对应的 command 已不在任何 visible:true 命令组中 → 终止并移除
-   * 2. 同步字段:从第一个可见命令组复制 name / cwd / snapshotEnabled 到 tab
+   * 2. 同步字段:从第一个可见命令组复制 name / cwd 到 tab
    *    - cwd 改了不重启子进程(下次启动生效)
-   *    - snapshotEnabled 仅改字段,运行中的进程不变
    *    - name 仅改字段,UI 跟随重渲染
    *
    * 注:同一 command 可能出现在多个命令组中(数据模型允许);这里以"任一可见
@@ -224,13 +227,12 @@ export class MergedRunnerInspectorView extends ItemView {
       this.tabs = this.tabs.filter((t) => !orphanIds.has(t.id));
     }
 
-    // 2) 同步字段:每个保留 tab 从对应可见命令组拉 name / cwd / snapshotEnabled
+    // 2) 同步字段:每个保留 tab 从对应可见命令组拉 name / cwd
     for (const tab of this.tabs) {
       const g = firstVisibleByCommand.get(tab.command);
       if (!g) continue; // 上面已过滤,这里不该发生,但防御性兜底
       tab.name = g.name;
       tab.cwd = g.cwd;
-      tab.snapshotEnabled = g.snapshotEnabled ?? false;
     }
 
     this.saveConfigs();
@@ -252,17 +254,15 @@ export class MergedRunnerInspectorView extends ItemView {
       output: "",
       child: null,
       generation: 0,
-      snapshotEnabled: c.snapshotEnabled ?? false,
     }));
     this.expandedIds.clear();
     this.outputElMap.clear();
     this.renderProcAll();
   }
 
-  startOrCreateTab(name: string, command: string, cwd: string, snapshotEnabled = false): RunnerTab {
-    const { tab, created } = resolveOrCreateTab(this.tabs, name, command, cwd);
+  startOrCreateTab(name: string, command: string, cwd: string, rescanOnExit = false): RunnerTab {
+    const { tab, created } = resolveOrCreateTab(this.tabs, name, command, cwd, rescanOnExit);
     if (created) {
-      tab.snapshotEnabled = snapshotEnabled;
       this.tabs.push(tab);
       this.expandedIds.add(tab.id);
       this.expandScrollId = tab.id;
@@ -270,11 +270,15 @@ export class MergedRunnerInspectorView extends ItemView {
       this.renderProcAll();
     }
     tab.output = "";
-    if (tab.snapshotEnabled) {
-      void this.opts.onProcessStart?.(tab);
-      this._incSnapshotRef(tab.id, tab.name);
-    }
-    startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
+    // 记录启动时的活动笔记路径,rescanOnExit 触发时扫描这个笔记
+    // (避免进程跑完时用户已切到别处导致扫错)
+    tab.rescanTargetPath = this.getActiveNotePath() ?? undefined;
+    startProcess(
+      tab,
+      (kind) => this.onProcChange(tab.id, kind),
+      // 成功退出 + 启用 rescanOnExit 时,通知 main.ts 触发重新扫描
+      (t) => this.opts.onProcessExit?.(t),
+    );
     return tab;
   }
 
@@ -321,22 +325,22 @@ export class MergedRunnerInspectorView extends ItemView {
     this.logBtnEl.createSpan({ text: "日志" });
     this.logBtnEl.addEventListener("click", () => this.toggleLogSection());
 
-    // 双链树 切换按钮 → 显示/隐藏 wliZoneEl 内的 treeContainer
+    // 双链树 切换按钮 → 显示/隐藏 整个 tree zone
     this.treeToggleBtnEl = utilityRow.createDiv({
       cls: "proc-util-btn",
-      title: "切换完善历史树",
+      title: "显示双链树",
     });
     setIcon(this.treeToggleBtnEl, "git-branch");
-    this.treeToggleBtnEl.createSpan({ text: "双链树" });
+    this.treeToggleBtnEl.createSpan({ text: "显示双链树" });
     this.treeToggleBtnEl.addEventListener("click", () => this.toggleTreeContainer());
 
-    // ===== Zone 2: 双链检查 (fills remaining space) =====
+    // ===== Zone 2: 双链列表（未解析 + 最新已解析） =====
     this.wliZoneEl = root.createDiv({ cls: "merged-zone merged-zone-wli" });
     this.buildWliSection();
 
-    // ===== Zone 2.5: 最新已解析双链 (有界,不抢 flex 空间) =====
-    this.wliResolvedZoneEl = root.createDiv({ cls: "merged-zone merged-zone-wli-resolved" });
-    this.buildResolvedSection();
+    // ===== Zone 2.5: 双链树（独立 zone,隐藏时完全脱离布局） =====
+    this.treeZoneEl = root.createDiv({ cls: "merged-zone merged-zone-tree is-hidden" });
+    this.buildTreeSection();
 
     // ===== Zone 3: 终端输出 (hidden by default) =====
     this.procZoneEl = root.createDiv({ cls: "merged-zone merged-zone-proc is-collapsed" });
@@ -360,11 +364,14 @@ export class MergedRunnerInspectorView extends ItemView {
         group.name,
         tab
           ? () => {
-            // 更新 tab 的快照标记(命令组可能已变)
-            tab.snapshotEnabled = group.snapshotEnabled ?? false;
             void this.toggleProcess(tab);
           }
-          : () => this.startOrCreateTab(group.name, group.command, group.cwd || this.opts.defaultCwd, group.snapshotEnabled ?? false),
+          : () => this.startOrCreateTab(
+              group.name,
+              group.command,
+              group.cwd || this.opts.defaultCwd,
+              group.rescanOnExit,
+            ),
         tab,
       );
     }
@@ -395,7 +402,7 @@ export class MergedRunnerInspectorView extends ItemView {
     const head = this.wliZoneEl.createDiv({ cls: "zone-head" });
     const chevron = head.createDiv({ cls: "zone-head-cv" });
     setIcon(chevron, "chevron-down");
-    head.createSpan({ cls: "zone-head-title", text: "未解析双链" });
+    head.createSpan({ cls: "zone-head-title", text: "双链列表" });
     this.wliChevronEl = chevron;
 
     // 清除全部按钮:把 [[x]] 转成 [x] 语法清除
@@ -412,109 +419,135 @@ export class MergedRunnerInspectorView extends ItemView {
 
     this.wliBodyEl = this.wliZoneEl.createDiv({ cls: "zone-wli-body" });
 
-    // 树容器:挂在 wliBodyEl 末尾(由 WLI 列表独占 flex:1, 树用 position:absolute 脱离文档流)
-    // 树展开时不挤压 WLI 列表
+    head.addEventListener("click", () => {
+      this.wliCollapsed = !this.wliCollapsed;
+      setIcon(this.wliChevronEl, this.wliCollapsed ? "chevron-right" : "chevron-down");
+      this.wliBodyEl.toggleClass("is-collapsed", this.wliCollapsed);
+      this.wliZoneEl.toggleClass("is-shrunk", this.wliCollapsed);
+    });
+  }
+
+  /** 构建独立「双链树」区块:隐藏时整个 zone 消失,不占位 */
+  private buildTreeSection(): void {
+    const head = this.treeZoneEl.createDiv({ cls: "zone-head" });
+    const chevron = head.createDiv({ cls: "zone-head-cv" });
+    setIcon(chevron, "chevron-down");
+    head.createSpan({ cls: "zone-head-title", text: "双链树" });
+    this.treeScanBtnEl = head.createDiv({
+      cls: "tree-scan-btn clickable-icon",
+      attr: { title: "生成当前页面的双链树" },
+    });
+    setIcon(this.treeScanBtnEl, "list-tree");
+    this.treeScanBtnEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.onTreeScanClick();
+    });
+
+    this.treeBodyEl = this.treeZoneEl.createDiv({ cls: "zone-tree-body" });
     this.treeContainerEl = activeDocument.createElement("div");
-    this.treeContainerEl.className = "wli-tree-container is-hidden";
-    this.wliBodyEl.appendChild(this.treeContainerEl);
+    this.treeContainerEl.className = "wli-tree-container";
+    this.treeBodyEl.appendChild(this.treeContainerEl);
+
     try {
       this.treeView.mount(this.treeContainerEl);
     } catch (e) {
       console.warn("[link-tree] mount failed", e);
     }
 
-    head.addEventListener("click", () => {
-      this.wliCollapsed = !this.wliCollapsed;
-      setIcon(this.wliChevronEl, this.wliCollapsed ? "chevron-right" : "chevron-down");
-      this.wliBodyEl.toggleClass("is-collapsed", this.wliCollapsed);
-      this.wliZoneEl.toggleClass("is-shrunk", this.wliCollapsed);
-      // 注意:不再联动 treeContainer 的显示/隐藏
-      // 树图由「双链树」按钮独立控制,与 zone 折叠解耦
+    // loading overlay —— 扫描生成树时显示转圈,绝对定位覆盖 canvas
+    this.treeLoadingEl = this.treeContainerEl.createDiv({ cls: "tree-loading-overlay" });
+    this.treeLoadingEl.createDiv({ cls: "tree-spinner" });
+
+    head.addEventListener("click", () => this.toggleTreeContainer());
+    applyTreeZoneVisibility({
+      treeZoneEl: this.treeZoneEl,
+      toggleBtnEl: this.treeToggleBtnEl,
+      visible: this.treeContainerVisible,
+      setIcon,
     });
   }
 
-  /** 构建「最新已解析双链」折叠区块(仿 buildWliSection,无 action 按钮/无 tree) */
-  private buildResolvedSection(): void {
-    const head = this.wliResolvedZoneEl.createDiv({ cls: "zone-head" });
-    const chevron = head.createDiv({ cls: "zone-head-cv" });
-    setIcon(chevron, "chevron-down");
-    head.createSpan({ cls: "zone-head-title", text: "最新已解析双链" });
-    this.wliResolvedChevronEl = chevron;
+  private async onTreeScanClick(): Promise<void> {
+    const activePath = this.getActiveNotePath();
+    console.debug("[scan] onTreeScanClick enter, activePath=", activePath);
+    if (!activePath) {
+      new Notice("请先打开一篇笔记");
+      return;
+    }
 
-    this.wliResolvedBodyEl = this.wliResolvedZoneEl.createDiv({ cls: "zone-wli-body" });
+    if (!this.opts.onTreeScan) {
+      console.warn("[scan] onTreeScan callback not provided");
+      return;
+    }
 
-    head.addEventListener("click", () => {
-      this.wliResolvedCollapsed = !this.wliResolvedCollapsed;
-      setIcon(this.wliResolvedChevronEl, this.wliResolvedCollapsed ? "chevron-right" : "chevron-down");
-      this.wliResolvedBodyEl.toggleClass("is-collapsed", this.wliResolvedCollapsed);
-      this.wliResolvedZoneEl.toggleClass("is-shrunk", this.wliResolvedCollapsed);
-    });
+    // Ensure the zone is visible — icon click may happen even if the user
+    // hasn't toggled the tree zone open yet (icon sits in the zone header,
+    // so this only fires when the zone is shown, but defensive).
+    if (!this.treeContainerVisible) {
+      console.debug("[scan] zone hidden, auto-open");
+      this.toggleTreeContainer();
+    }
+
+    this.treeScanBtnEl.setAttr("disabled", "true");
+    this.treeContainerEl.addClass("is-loading");
+    try {
+      await this.opts.onTreeScan(activePath);
+      console.debug("[scan] onTreeScan callback done");
+      // Force tree refresh — linkTreeEvents changed in main.ts
+      const events = this.opts.getLinkTreeEvents();
+      console.debug("[scan] getLinkTreeEvents returned", events.length, "events");
+      const graph = buildBklinkGraph(this.app);
+      console.debug("[scan] buildBklinkGraph done, forward=", graph.forward.size, "backward=", graph.backward.size);
+      const filtered = filterByActiveNote(events, activePath, graph);
+      console.debug("[scan] filterByActiveNote returned", filtered.length, "events");
+      console.debug("[scan] calling treeView.updateFromApp, canvas container size =",
+        this.treeContainerEl?.clientWidth, "x", this.treeContainerEl?.clientHeight);
+      this.treeView.updateFromApp(filtered, this.app, activePath);
+      console.debug("[scan] treeView.updateFromApp done");
+      // User-facing success/failure Notice is owned by main.ts (onTreeScanClicked),
+      // which knows the nodeCount — don't double-fire here.
+    } catch (err) {
+      console.warn("[scan] tree scan failed", err);
+    } finally {
+      this.treeContainerEl.removeClass("is-loading");
+      this.treeScanBtnEl.removeAttribute("disabled");
+    }
   }
 
   private refreshWli(): void {
     this.rows = collectRows(makeSource(this.app));
     this.renderWliAll();
-    this.renderResolvedAll();
     // 完善历史树:有事件或已挂载则更新
     try {
       const events = this.opts.getLinkTreeEvents();
       if (events.length || this.treeContainerEl?.isConnected) {
         const activePath = this.getActiveNotePath();
-        this.treeView.updateFromApp(events, this.app, activePath);
+        const treeGraph = buildBklinkGraph(this.app);
+        const treeEvents = filterByActiveNote(events, activePath, treeGraph);
+        this.treeView.updateFromApp(treeEvents, this.app, activePath);
       }
     } catch (e) {
       console.warn("[link-tree] update failed", e);
     }
   }
 
-  /** 双链树 切换按钮点击 —— 显示/隐藏 treeContainer */
+  /** 双链树切换按钮点击 —— 显示/隐藏整个 tree zone */
   private toggleTreeContainer(): void {
     this.treeContainerVisible = !this.treeContainerVisible;
-    this.treeContainerEl.toggleClass("is-hidden", !this.treeContainerVisible);
-    this.treeToggleBtnEl.toggleClass("is-active", this.treeContainerVisible);
+    applyTreeZoneVisibility({
+      treeZoneEl: this.treeZoneEl,
+      toggleBtnEl: this.treeToggleBtnEl,
+      visible: this.treeContainerVisible,
+      setIcon,
+    });
     if (this.treeContainerVisible) {
       // 首次展开时主动触发一次更新,确保 canvas 拿到正确尺寸
       const events = this.opts.getLinkTreeEvents();
       const activePath = this.getActiveNotePath();
-      this.treeView.updateFromApp(events, this.app, activePath);
+      const treeGraph = buildBklinkGraph(this.app);
+      const treeEvents = filterByActiveNote(events, activePath, treeGraph);
+      this.treeView.updateFromApp(treeEvents, this.app, activePath);
     }
-  }
-
-  // ---- Snapshot 监听器引用计数 ------------------------------------------------
-
-  /**
-   * 注册一次 metadataCache.on("resolved") 回调。
-   * refCount === 1 时才真正注册(单监听器),之后仅递增计数。
-   * tabId 用于幂等:同一 tab 多次调用不会重复计数。
-   */
-  private _incSnapshotRef(tabId: string, tabName: string): void {
-    if (this._snapshotActiveTabs.has(tabId)) return;
-    this._snapshotActiveTabs.add(tabId);
-    this._snapshotRefCount++;
-    if (this._snapshotRefCount === 1) {
-      const cb = () => {
-        const activePath = this.getActiveNotePath();
-        this.treeView.updateFromApp(this.opts.getLinkTreeEvents(), this.app, activePath);
-      };
-      this._snapshotEventRef = this.app.metadataCache.on("resolved", cb);
-    }
-    console.debug(`[snapshot] 进程「${tabName}」启动，开始监听未解析双链 (refCount=${this._snapshotRefCount})`);
-  }
-
-  /**
-   * 注销一次 metadataCache.on("resolved") 回调。
-   * refCount === 0 时才真正注销,且幂等。
-   */
-  private _decSnapshotRef(tabId: string, tabName: string): void {
-    if (!this._snapshotActiveTabs.has(tabId)) return;
-    this._snapshotActiveTabs.delete(tabId);
-    this._snapshotRefCount--;
-    if (this._snapshotRefCount <= 0 && this._snapshotEventRef) {
-      this.app.metadataCache.offref(this._snapshotEventRef);
-      this._snapshotEventRef = null;
-      this._snapshotRefCount = 0;
-    }
-    console.debug(`[snapshot] 进程「${tabName}」退出，结束监听 (refCount=${this._snapshotRefCount})`);
   }
 
   /** 当前打开的 MarkdownView —— 用于 link-tree 跳转与作用域过滤 */
@@ -531,6 +564,12 @@ export class MergedRunnerInspectorView extends ItemView {
   /** 当前打开笔记的路径（用于 link-tree 作用域过滤） */
   private getActiveNotePath(): string | null {
     return this.getTargetMarkdownView()?.file?.path ?? null;
+  }
+
+  /** 按 basename 找 vault 中的文件路径（例如点击树节点时跳转用） */
+  private findBasenamePath(basename: string): string | null {
+    const files = this.app.vault.getMarkdownFiles();
+    return files.find((f) => f.basename === basename)?.path ?? null;
   }
 
   /** 清除未解析双链:[[x]] → [x] 语法清除(基于正则 + unresolved 过滤) */
@@ -623,79 +662,76 @@ export class MergedRunnerInspectorView extends ItemView {
   }
 
   private renderWliAll(): void {
-    const treeEl = this.treeContainerEl;
-
     this.wliBodyEl.empty();
 
-    // 1) 渲染 WLI 列表内容（在上面）
-    const { unresolved } = partitionByState(this.rows);
+    const { unresolved, resolved } = partitionByState(this.rows);
+    const dedupedResolved = dedupeRowsByTarget(resolved);
+    const resolvedLimit = this.opts.settings.resolvedRecentLimit ?? 10;
+    const shownResolved = dedupedResolved.slice(0, resolvedLimit);
 
-    // Update zone title with only unresolved count
     const titleEl = this.wliZoneEl.querySelector(".zone-head-title");
     if (titleEl) {
-      titleEl.setText(`未解析双链 (${unresolved.length})`);
+      titleEl.setText(`双链列表 · 未解析 ${unresolved.length} · 已解析 ${shownResolved.length}/${dedupedResolved.length}`);
     }
 
-    if (unresolved.length === 0) {
-      this.wliBodyEl.createDiv({
-        cls: "wli-empty",
-        text: "所有双链均已解析",
-      });
-      // 树容器追加到 WLI 列表下方
-      if (treeEl) this.wliBodyEl.appendChild(treeEl);
-      return;
-    }
-
-    const shown = unresolved.slice(0, this.limit.unresolved);
-    for (const r of shown) {
-      renderInspectorRow(this.wliBodyEl, r, (row) => void this.openSource(row));
-    }
-
-    if (unresolved.length > this.limit.unresolved) {
-      const more = this.wliBodyEl.createDiv({
-        cls: "wli-load-more",
-        text: `加载更多 +${DEFAULT_PREVIEW}（剩 ${unresolved.length - this.limit.unresolved}）`,
-      });
-      more.addEventListener("click", () => {
+    this.renderWliSubsection({
+      title: "未解析双链",
+      emptyText: "没有未解析双链",
+      rows: unresolved,
+      state: "unresolved",
+      limit: this.limit.unresolved,
+      onLoadMore: () => {
         this.limit.unresolved += DEFAULT_PREVIEW;
         this.renderWliAll();
-      });
-    }
-    // 树容器追加到 WLI 列表下方
-    if (treeEl) this.wliBodyEl.appendChild(treeEl);
+      },
+    });
+
+    this.renderWliSubsection({
+      title: "最新已解析双链",
+      emptyText: "暂无已解析双链",
+      rows: dedupedResolved,
+      state: "resolved",
+      limit: resolvedLimit,
+      onLoadMore: null,
+    });
   }
 
-  /** 渲染「最新已解析双链」:按目标去重 → 取前 N(设置项) */
-  private renderResolvedAll(): void {
-    if (!this.wliResolvedBodyEl) return;
-    this.wliResolvedBodyEl.empty();
+  private renderWliSubsection(options: {
+    title: string;
+    emptyText: string;
+    rows: LinkRow[];
+    state: "resolved" | "unresolved";
+    limit: number;
+    onLoadMore: (() => void) | null;
+  }): void {
+    const section = this.wliBodyEl.createDiv({ cls: `wli-subsection is-${options.state}` });
+    section.createDiv({
+      cls: "wli-subsection-title",
+      text: `${options.title} (${Math.min(options.rows.length, options.limit)}/${options.rows.length})`,
+    });
 
-    const { resolved } = partitionByState(this.rows);
-    const deduped = dedupeRowsByTarget(resolved);
-    const n = this.opts.settings.resolvedRecentLimit ?? 10;
-    const shown = deduped.slice(0, n);
-
-    const titleEl = this.wliResolvedZoneEl.querySelector(".zone-head-title");
-    if (titleEl) {
-      titleEl.setText(`最新已解析双链 (${shown.length}/${deduped.length})`);
-    }
-
-    if (shown.length === 0) {
-      this.wliResolvedBodyEl.createDiv({
-        cls: "wli-empty",
-        text: "暂无已解析双链",
-      });
+    if (options.rows.length === 0) {
+      section.createDiv({ cls: "wli-empty", text: options.emptyText });
       return;
     }
 
+    const shown = options.rows.slice(0, options.limit);
     for (const r of shown) {
-      renderInspectorRow(this.wliResolvedBodyEl, r, (row) => void this.openSource(row));
+      renderInspectorRow(section, r, (row) => void this.openSource(row));
+    }
+
+    if (options.onLoadMore && options.rows.length > options.limit) {
+      const more = section.createDiv({
+        cls: "wli-load-more",
+        text: `加载更多 +${DEFAULT_PREVIEW}（剩 ${options.rows.length - options.limit}）`,
+      });
+      more.addEventListener("click", options.onLoadMore);
     }
   }
 
   /** 设置页改动「最新已解析双链数量」后调用:view 已 build 时即时重渲 */
   notifyResolvedLimitChanged(): void {
-    this.renderResolvedAll();
+    this.renderWliAll();
   }
 
   // ---- 进程日志 Section ------------------------------------------------------
@@ -755,11 +791,6 @@ export class MergedRunnerInspectorView extends ItemView {
   private onProcChange(tabId: string, kind: ProcChangeKind): void {
     if (kind === "status") {
       this.renderProcAll();
-      // snapshotEnabled 进程退出 → 注销监听器(引用计数)
-      const tab = this.tabs.find((t) => t.id === tabId);
-      if (tab?.snapshotEnabled && !isRunning(tab)) {
-        this._decSnapshotRef(tabId, tab.name);
-      }
       return;
     }
     this.scheduleProcRender(tabId);
@@ -888,14 +919,6 @@ export class MergedRunnerInspectorView extends ItemView {
     // exited-* / stopped → 直接启动;startProcess 入口处的 child 空判断与 generation
     // 自增保证了旧子进程(exited-* 路径 close 回调里已 tab.child=null)不会污染新进程。
     tab.output = "";
-    if (tab.snapshotEnabled) {
-      try {
-        await this.opts.onProcessStart?.(tab);
-      } catch (e) {
-        console.warn("[link-tree] onProcessStart snapshot failed", e);
-      }
-      this._incSnapshotRef(tab.id, tab.name);
-    }
     startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
   }
 
@@ -908,7 +931,6 @@ export class MergedRunnerInspectorView extends ItemView {
         name: t.name,
         command: t.command,
         cwd: t.cwd,
-        snapshotEnabled: t.snapshotEnabled ?? false,
       })),
     );
   }

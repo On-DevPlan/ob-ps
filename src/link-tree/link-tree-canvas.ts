@@ -50,11 +50,16 @@ export class LinkTreeCanvas {
     // CSS 类管理样式,避免 obsidianmd/no-static-styles-assignment
     this.canvas.className = "link-tree-canvas";
     container.appendChild(this.canvas);
+    console.debug("[scan] LinkTreeCanvas.mount, container size =",
+      container.clientWidth, "x", container.clientHeight);
     this.renderer = new CanvasRenderer(this.canvas.getContext("2d")!);
     this.bindEvents();
     window.addEventListener("resize", this._rs);
     try {
       this._ro = new ResizeObserver(() => {
+        console.debug("[scan] ResizeObserver fired, canvas size =",
+          this.canvas.clientWidth, "x", this.canvas.clientHeight,
+          "firstUpdate=", this.firstUpdate, "nodes=", this.nodes.length);
         if (this.canvas.clientWidth > 0 && this.canvas.clientHeight > 0 && !this.firstUpdate) {
           this.fit();
           if (this.activeId && this.layoutMap.has(this.activeId)) {
@@ -72,10 +77,12 @@ export class LinkTreeCanvas {
     deps: ProjectDeps,
     activeNoteTarget?: string | null,
   ): void {
+    console.debug("[scan] LinkTreeCanvas.update enter, events=", events.length);
     this.evMap.clear();
     for (const e of events) this.evMap.set(e.target, e);
 
     const treeRoots = projectTree(events, deps);
+    console.debug("[scan] projectTree returned", treeRoots.length, "roots");
 
     // 建 LayoutNode 森林：带 ghost origin
     const ghostMap = new Map<string, TreeNode[]>();
@@ -140,20 +147,33 @@ export class LinkTreeCanvas {
 
     this.nodes = nd;
     this.edges = ed;
+    console.debug("[scan] LinkTreeCanvas.update built", nd.length, "nodes", ed.length, "edges");
 
     // 更新 activeId（当前打开的笔记 → 高亮节点）
     const newActive = activeNoteTarget ?? null;
     const activeChanged = newActive !== this.activeId;
     this.activeId = newActive;
 
-    if (this.firstUpdate) {
+    // Defer the firstUpdate "fit + center" until the canvas actually has
+    // a non-zero size. The container may still be 0×0 if the tree zone is
+    // collapsed at the time update() runs (e.g. right after a scan click
+    // before the user toggles the zone open). Calling fit() at w=0/h=0
+    // would produce a NaN/zero viewport scale; the ResizeObserver will
+    // re-run update once the zone is shown.
+    const hasSize = this.canvas.clientWidth > 0 && this.canvas.clientHeight > 0;
+    console.debug("[scan] LinkTreeCanvas.update canvas client size =",
+      this.canvas.clientWidth, "x", this.canvas.clientHeight,
+      "hasSize=", hasSize, "firstUpdate=", this.firstUpdate);
+
+    if (hasSize && this.firstUpdate) {
       // 首次加载：fit 到全景，若有 active 则居中
       this.fit();
       if (this.activeId && this.layoutMap.has(this.activeId)) {
         this._panToCenter(this.activeId);
       }
       this.firstUpdate = false;
-    } else if (activeChanged && this.activeId && this.layoutMap.has(this.activeId)) {
+      console.debug("[scan] firstUpdate consumed, fit() called, vp=", this.vp);
+    } else if (hasSize && this.activeId && this.layoutMap.has(this.activeId) && activeChanged) {
       // active 切换：平滑动画到新节点（保留 zoom）
       this._animatePanTo(this.activeId);
     }
@@ -267,6 +287,8 @@ export class LinkTreeCanvas {
   private _ro: ResizeObserver | null = null;
   private _rf(): void {
     if (!this.canvas || !this.renderer) return;
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    console.debug("[scan] _rf render canvas=", w, "x", h, "nodes=", this.nodes.length, "vp.scale=", this.vp.scale);
     this.renderer.render(this.canvas, this.vp, this.nodes, this.edges, this.clickedId, this.activeId, this.hoverId);
   }
   private _panToCenter(id: string): void {
