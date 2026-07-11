@@ -11,6 +11,10 @@ export interface CommandGroup {
   cwd: string;      // 工作目录(空表示用默认)
   /** 是否在侧边栏显示(默认 true) */
   visible?: boolean;
-  /** 启动时是否拍双链快照(默认 false) */
-  snapshotEnabled?: boolean;
+  /**
+   * 进程成功退出后,自动重新扫描"启动时记录的活动笔记"的双链树。
+   * 用途:dev server 跑完后,捕获新创建的笔记,刷新双链树。
+   * 默认 false(显式 opt-in,避免 dev server 长期跑用户的端口被频繁触发)。
+   */
+  rescanOnExit?: boolean;
 }

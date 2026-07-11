@@ -17,8 +17,6 @@ export interface FormPrefill {
   name: string;
   command: string;
   cwd: string;
-  /** 启动时是否拍双链快照(默认 false) */
-  snapshotEnabled?: boolean;
 }
 
 /** 表单渲染上下文 */
@@ -99,9 +97,6 @@ export function renderProcessForm(
     ctx.prefill.cwd,
   );
 
-  // 启动时拍双链快照(单选,默认不勾)
-  const snapshotCheck = renderSnapshotCheck(fields, ctx.prefill.snapshotEnabled ?? false);
-
   // 绑定下拉联动
   if (!isEdit && commandSelectEl) {
     commandSelectEl.addEventListener("change", () => {
@@ -140,7 +135,7 @@ export function renderProcessForm(
     title: "仅保存到侧边栏,不启动进程",
   });
   saveBtn.addEventListener("click", () =>
-    handleSubmit(ctx, nameInput.value, cmdInput.value, cwdInput.value, snapshotCheck.checked, false),
+    handleSubmit(ctx, nameInput.value, cmdInput.value, cwdInput.value, false),
   );
 
   const submitBtn = actions.createEl("button", {
@@ -148,7 +143,7 @@ export function renderProcessForm(
     text: isEdit ? "保存" : "运行",
   });
   submitBtn.addEventListener("click", () => {
-    handleSubmit(ctx, nameInput.value, cmdInput.value, cwdInput.value, snapshotCheck.checked, true);
+    handleSubmit(ctx, nameInput.value, cmdInput.value, cwdInput.value, true);
   });
   if (isEdit) {
     // 编辑模式:把中间的「保存」按钮隐藏(只有「取消」+「保存」两个动作)
@@ -256,7 +251,6 @@ function handleSubmit(
   nameRaw: string,
   cmdRaw: string,
   cwdRaw: string,
-  snapshotEnabled: boolean,
   autostart: boolean,
 ): void {
   const name = nameRaw.trim();
@@ -275,31 +269,11 @@ function handleSubmit(
     ctx.editingTab.name = name;
     ctx.editingTab.command = command;
     ctx.editingTab.cwd = cwd;
-    ctx.editingTab.snapshotEnabled = snapshotEnabled;
     ctx.onSubmit({ kind: "edit", tab: ctx.editingTab });
     return;
   }
 
-  const tab = createTab(name, command, cwd, snapshotEnabled);
+  const tab = createTab(name, command, cwd);
   // startProcess 由主类负责 —— 它需要把回调接进自己的 scheduleRender
   ctx.onSubmit({ kind: "add", tab, autostart });
-}
-
-/** 渲染「启动时拍双链快照」单选(默认不勾) */
-function renderSnapshotCheck(fields: HTMLElement, initial: boolean): HTMLInputElement {
-  console.debug("[DBG renderSnapshotCheck] enter, initial=", initial);
-  const fd = fields.createDiv({ cls: "runner-form-field is-check" });
-  const check = fd.createEl("input", {
-    cls: "runner-form-check",
-    attr: { type: "checkbox", title: "勾选后,启动该进程前会先拍一次未解析双链快照到历史树" },
-  });
-  check.checked = initial;
-  const label = fd.createEl("label", {
-    cls: "runner-form-check-label",
-    text: "启动时拍双链快照",
-  });
-  label.setAttribute("for", "snapshot-check");
-  check.id = "snapshot-check";
-  console.debug("[DBG renderSnapshotCheck] appended check to fields, fields.children=", fields.children.length);
-  return check;
 }

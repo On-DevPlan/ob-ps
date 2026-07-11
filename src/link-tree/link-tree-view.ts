@@ -16,24 +16,28 @@ import { normalizeTarget } from "./creation-event";
 import { makeProjectDeps, type ProjectDeps } from "./tree-projector";
 import { loadEvents, appendEvents, type HasLinkTree } from "./link-tree-repository";
 import type { App } from "obsidian";
+import type { BklinkGraph } from "./topic-resolver";
+import { findTopicRoot } from "./topic-resolver";
 
-/** 顶层文件夹路径第一段（用于作用域过滤） */
-function firstSeg(path: string): string {
-  const idx = path.indexOf("/");
-  return idx < 0 ? "(root)" : path.slice(0, idx);
+/** 从 vault 相对路径提取 basename,去除 .md 后缀 */
+function basenameFromPath(path: string): string {
+  const last = path.split("/").pop() ?? path;
+  return last.replace(/\.md$/i, "");
 }
 
 /**
- * 按当前笔记路径过滤事件到同一顶层文件夹。
+ * 按当前笔记路径过滤事件到同一主题根（bklink 向上追溯到的根）。
  * 活跃笔记不存在则退化为全部。
  */
 export function filterByActiveNote(
   events: CreationEvent[],
   activeNotePath: string | null,
+  graph: BklinkGraph,
 ): CreationEvent[] {
   if (!activeNotePath) return events;
-  const zone = firstSeg(activeNotePath);
-  return events.filter((e) => firstSeg(e.sourcePath) === zone);
+  const activeBasename = basenameFromPath(activeNotePath);
+  const activeRoot = findTopicRoot(activeBasename, graph);
+  return events.filter((e) => e.topicRoot === activeRoot);
 }
 
 // ---- 视图类 ----
@@ -46,11 +50,28 @@ export class TreeLinkView {
   private currentDeps: ProjectDeps | null = null;
   private currentActiveNotePath: string | null = null;
   private onJump: ((event: CreationEvent) => void) | null = null;
+  /** 折叠状态变化时通知 caller(用于持久化),由 main.ts 提供 */
+  private onCollapsedChange: ((topicRoot: string, collapsed: string[]) => void) | null = null;
+  /** 当前 active note 的 topicRoot —— 从 events[0]?.topicRoot 派生,
+   *  用于 onCollapsedChange 时知道写到 linkTreeCollapsed[哪个主题] */
+  private currentTopicRoot: string | null = null;
 
   /** 注入 openSource 回调（由 merged-view 提供） */
-  constructor(onJump: (event: CreationEvent) => void) {
+  constructor(
+    onJump: (event: CreationEvent) => void,
+    options?: {
+      initialCollapsed?: string[];
+      onCollapsedChange?: (topicRoot: string, collapsed: string[]) => void;
+    },
+  ) {
     this.canvas = new LinkTreeCanvas();
     this.onJump = onJump;
+    if (options?.initialCollapsed) {
+      this.collapsed = new Set(options.initialCollapsed);
+    }
+    if (options?.onCollapsedChange) {
+      this.onCollapsedChange = options.onCollapsedChange;
+    }
   }
 
   /** 挂载 canvas 到某个 HTMLElement（如双链检查 zone） */
@@ -60,30 +81,39 @@ export class TreeLinkView {
       onJump: (ev) => this.onJump?.(ev),
       onCollapseChange: (s) => {
         this.collapsed = s;
+        // 通知 caller(持久化到 linkTreeCollapsed[currentTopicRoot])
+        if (this.currentTopicRoot) {
+          this.onCollapsedChange?.(this.currentTopicRoot, [...s]);
+        }
+        // currentEvents 已经过 filterByActiveNote 过滤,折叠/展开只需重绘
         if (this.currentDeps) {
           this.canvas.setCollapsed(this.collapsed);
-          const filtered = this.currentActiveNotePath
-            ? filterByActiveNote(this.currentEvents, this.currentActiveNotePath)
-            : this.currentEvents;
-          this.canvas.update(filtered, this.currentDeps);
+          this.canvas.update(this.currentEvents, this.currentDeps);
         }
       },
     });
   }
 
-  /** 全链路更新（过滤 → 投影 → 布局 → 绘制） */
+  /** 全链路更新（投影 → 布局 → 绘制）。
+ *
+ * 注意:本方法假设 events 已经过 filterByActiveNote 过滤。所有 caller
+ * (merged-view 的 5 处调用点)在调用 updateFromApp 前都已用真实 graph
+ * 过滤过。本方法不再重复过滤——之前因为 updateFromApp 不传 graph,
+ * 内部用 EMPTY_GRAPH 二次过滤会把数据全部过滤掉(topicRoot 不匹配)。
+ */
   update(
     events: CreationEvent[],
     deps: ProjectDeps,
     activeNotePath?: string | null,
   ): void {
+    console.debug("[scan] TreeLinkView.update enter, events=", events.length, "activeNotePath=", activeNotePath);
     this.currentEvents = events;
     this.currentDeps = deps;
     this.currentActiveNotePath = activeNotePath ?? null;
+    this.currentTopicRoot = events[0]?.topicRoot ?? null;
 
-    const filtered = activeNotePath
-      ? filterByActiveNote(events, activeNotePath)
-      : events;
+    const filtered = events;  // 不再内部过滤,caller 已过滤
+    console.debug("[scan] TreeLinkView.update using", filtered.length, "events directly");
 
     const noteBasename = activeNotePath
       ? (activeNotePath.split("/").pop() ?? "").replace(/\.md$/i, "")
@@ -91,9 +121,11 @@ export class TreeLinkView {
     const activeNoteTarget = noteBasename
       ? filtered.find((e) => normalizeTarget(e.target) === noteBasename)?.target ?? null
       : null;
+    console.debug("[scan] TreeLinkView.update noteBasename=", noteBasename, "activeNoteTarget=", activeNoteTarget);
 
     this.canvas.setCollapsed(this.collapsed);
     this.canvas.update(filtered, deps, activeNoteTarget);
+    console.debug("[scan] TreeLinkView.update done");
   }
 
   /** 便捷版本：从 app 构建 deps */
@@ -105,17 +137,14 @@ export class TreeLinkView {
     this.update(events, makeProjectDeps(app), activeNotePath);
   }
 
-  /** 重置折叠状态并重算 */
+  /** 重置折叠状态并重算（currentEvents 已经过滤过,直接用） */
   collapseAll(): void {
     this.collapsed = new Set(
       this.currentEvents.map((e) => e.target),
     );
     if (this.currentEvents.length && this.currentDeps) {
       this.canvas.setCollapsed(this.collapsed);
-      this.canvas.update(
-        filterByActiveNote(this.currentEvents, null),
-        this.currentDeps,
-      );
+      this.canvas.update(this.currentEvents, this.currentDeps);
     }
   }
 
@@ -123,10 +152,7 @@ export class TreeLinkView {
     this.collapsed.clear();
     if (this.currentDeps) {
       this.canvas.setCollapsed(this.collapsed);
-      this.canvas.update(
-        filterByActiveNote(this.currentEvents, null),
-        this.currentDeps,
-      );
+      this.canvas.update(this.currentEvents, this.currentDeps);
     }
   }
 

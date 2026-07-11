@@ -21,6 +21,12 @@ export interface CreationEvent {
   firstSeenAt: number;
   /** 哪次完善点击（按批分组 / 筛选用） */
   runId: string;
+  /**
+   * 主题根 basename —— 通过 bklink 链向上追溯到的主题归属根节点（如 "前端"）。
+   * 用于按主题过滤事件，无需运行时再读 frontmatter。
+   * undefined 表示旧数据（迁移前）或未分类事件。
+   */
+  topicRoot?: string;
 }
 
 /** 持久化格式：PluginData.linkTree */

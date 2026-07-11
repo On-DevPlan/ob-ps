@@ -2,7 +2,6 @@ import { FileSystemAdapter, MarkdownView, Notice, Plugin, WorkspaceLeaf } from "
 import type { ProcessConfig } from "./src/types/process";
 import { DEFAULT_SETTINGS, type PluginSettings } from "./src/types/settings";
 import { MERGED_VIEW_TYPE, MergedRunnerInspectorView, type MergedViewOptions } from "./src/view";
-import { type RunnerTab } from "./src/runner";
 import {
   removeDataBackup,
   restoreDataBackup,
@@ -15,7 +14,8 @@ import { applyWikilinkStyle } from "./src/wikilink/highlight";
 import { reconcileInstalledFlag } from "./src/settings-tab/section-skills";
 import { flattenWikilinks } from "./src/wikilink-inspector/flatten-links";
 import { loadEvents, appendEvents } from "./src/link-tree/link-tree-repository";
-import { trackSnapshot } from "./src/link-tree/snapshot-hook";
+import { scanActiveNoteTopic, removeEventsByTopicRoot } from "./src/link-tree/vault-scanner";
+import { buildBklinkGraph, findTopicRoot } from "./src/link-tree/topic-resolver";
 import type { CreationEvent } from "./src/link-tree/creation-event";
 
 /** 编程方式跳转到设置标签页(内部 API) */
@@ -25,9 +25,38 @@ interface AppWithSetting {
 
 /** 持久化插件数据格式 */
 interface PluginData {
-  processes: ProcessConfig[];
+  /** schema 版本(v2:加 schemaVersion + 删除 processes) */
+  schemaVersion?: number;
+  /** @deprecated v2 起移除。命令配置迁入 settings.commandGroups。*/
+  processes?: ProcessConfig[];
   settings?: PluginSettings;
   linkTree?: { events: CreationEvent[]; version: number };
+  /** linkTree 节点折叠状态:按 topicRoot 分组的节点 basename 数组 */
+  linkTreeCollapsed?: Record<string, string[]>;
+}
+
+/** 当前 schema 版本。新加字段时递增,迁移逻辑判断 schemaVersion 走对应分支。*/
+const CURRENT_SCHEMA_VERSION = 2;
+
+/**
+ * v1 → v2 迁移:
+ * 1. 删除废弃的 `processes` 字段(snapshot 机制已删,数据不再用)
+ * 2. 给 linkTree.events 中无 topicRoot 的 legacy 事件打标记(可由 UI 清理)
+ * 3. 加 schemaVersion=2
+ */
+function migrateV1ToV2(data: PluginData): PluginData {
+  const next: PluginData = {
+    schemaVersion: 2,
+    settings: data.settings,
+    linkTree: data.linkTree
+      ? {
+          version: data.linkTree.version,
+          events: data.linkTree.events,
+        }
+      : undefined,
+  };
+  // 故意删除 processes(不复制)
+  return next;
 }
 
 /**
@@ -48,19 +77,33 @@ export default class LocalRunnerPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
   /** 完善历史树事件日志 */
   private linkTreeEvents: CreationEvent[] = [];
+  /**
+   * 折叠状态:用户主动折叠的节点 basename 集合。
+   * 按 topicRoot 分组(每个主题独立)持久化到 data.json。
+   * 形状: { [topicRoot: string]: string[] }
+   */
+  private linkTreeCollapsed: Record<string, string[]> = {};
 
   async onload(): Promise<void> {
-    console.debug("[DBG onload] local-runner plugin loaded, version=1.0.22-snapshot-hook-v3");
+    console.debug("[DBG onload] local-runner plugin loaded, version=1.0.27-bklink-topic");
 
     // 1. 加载持久化数据
     let data = (await this.loadData()) as PluginData | null;
+
+    // 1a. Schema 迁移:检测旧数据无 schemaVersion,做 v1→v2 升级
+    //     (主要动作:删除 legacy `processes` 字段,标记 schemaVersion=2)
+    if (data && !data.schemaVersion) {
+      data = migrateV1ToV2(data);
+      // 持久化迁移结果
+      await this.saveData(data);
+    }
 
     // 2. 主数据缺失(卸载/重装后)时,尝试从 vault 级备份恢复
     let restored = false;
     if (data === null) {
       const backup = this.tryRestoreBackup();
       if (backup) {
-        data = { processes: backup.processes, settings: backup.settings };
+        data = { processes: backup.processes, settings: backup.settings, schemaVersion: 2 };
         restored = true;
       }
     }
@@ -68,6 +111,7 @@ export default class LocalRunnerPlugin extends Plugin {
     this.savedConfigs = data?.processes ?? [];
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data?.settings);
     this.linkTreeEvents = loadEvents(data ?? null);
+    this.linkTreeCollapsed = data?.linkTreeCollapsed ?? {};
 
     // 3. 迁移 commandGroups:旧「一组多预设」→ 新「一组一命令」
     const rawGroups = this.settings.commandGroups;
@@ -174,9 +218,11 @@ export default class LocalRunnerPlugin extends Plugin {
       }
     }
     await this.saveData({
-      processes: this.savedConfigs,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      processes: this.savedConfigs,  // v2 起该字段已废弃,持久化时不再写(但读时仍兼容)
       settings: this.settings,
       linkTree: linkTreeStore,
+      linkTreeCollapsed: this.linkTreeCollapsed,
     });
     // 开启保留时同步刷新备份;关闭时清除已有备份
     // 注:备份链路暂不纳入 linkTree(对齐 joke 实际行为)
@@ -200,23 +246,85 @@ export default class LocalRunnerPlugin extends Plugin {
   }
 
   /**
-   * 进程启动前回调:若该进程勾选了「启动时拍双链快照」,
-   * 在此调用 trackSnapshot 拍一次未解析双链快照,追加到 linkTree 日志。
-   * runId 取 tab.id + 时间戳,保证每次进程启动唯一(按 runId 溯源)。
+   * 用户点击 tree scan 按钮时触发 vault 扫描。
+   * 取代了之前的 onProcessStart snapshot 机制(Tasks 7-9 删除)。
    */
-  async onProcessStart(tab: RunnerTab): Promise<void> {
-    const runId = `${tab.id}_${Date.now()}`;
-    console.debug("[DBG onProcessStart] enter, runId=", runId);
+  async onTreeScanClicked(activeNotePath: string): Promise<void> {
+    console.debug("[DBG onTreeScanClicked] enter, path=", activeNotePath);
     try {
-      const newEvents = await trackSnapshot(this, runId);
-      console.debug("[DBG onProcessStart] trackSnapshot returned", newEvents.length, "events");
-      if (newEvents.length) {
-        this.linkTreeEvents = appendEvents(this.linkTreeEvents, newEvents).events;
-        await this.saveSettings();
-      }
+      const result = await scanActiveNoteTopic(this.app, activeNotePath);
+      const filtered = removeEventsByTopicRoot(this.linkTreeEvents, result.topicRoot);
+      this.linkTreeEvents = appendEvents(filtered, result.events).events;
+      await this.saveSettings();
+      new Notice(`✅ 已生成 ${result.nodeCount} 节点的双链树`);
     } catch (e) {
-      console.warn("[link-tree] trackSnapshot failed", e);
+      console.warn("[link-tree] scan failed", e);
+      new Notice(`❌ 生成失败: ${(e as Error).message}`);
+      throw e; // re-throw so caller (merged-view) can also catch
     }
+  }
+
+  /**
+   * 删除指定 topicRoot 的所有 linkTree 事件(用于设置页 UI 清理某个主题)。
+   * 不修改入参数组;返回新数组并同步回 this.linkTreeEvents + 持久化。
+   * topicRoot 可以是 string(普通主题) 或 undefined(legacy 无 topicRoot 事件)。
+   */
+  async removeLinkTreeTopic(topicRoot: string | undefined): Promise<number> {
+    const before = this.linkTreeEvents.length;
+    this.linkTreeEvents = this.linkTreeEvents.filter(
+      (e) => e.topicRoot !== topicRoot,
+    );
+    const removed = before - this.linkTreeEvents.length;
+    if (removed > 0) await this.saveSettings();
+    return removed;
+  }
+
+  /**
+   * 清空所有 linkTree 事件(用于设置页"重置 linkTree 数据")。
+   * 同时清掉 legacy 无 topicRoot 的旧 snapshot 事件。
+   */
+  async clearAllLinkTreeEvents(): Promise<number> {
+    const before = this.linkTreeEvents.length;
+    this.linkTreeEvents = [];
+    if (before > 0) await this.saveSettings();
+    return before;
+  }
+
+  /**
+   * 列出 linkTree 按 topicRoot 分组的事件统计(用于设置页显示)。
+   * 返回 [{ topicRoot: string | undefined, count: number, latestScan: number }]
+   * latestScan = 该组内 firstSeenAt 最大的事件(粗略代表最近扫描时间)
+   */
+  listLinkTreeTopics(): Array<{ topicRoot: string | undefined; count: number; latestScan: number }> {
+    const groups = new Map<string | undefined, { count: number; latestScan: number }>();
+    for (const e of this.linkTreeEvents) {
+      const key = e.topicRoot;
+      const g = groups.get(key) ?? { count: 0, latestScan: 0 };
+      g.count++;
+      if (e.firstSeenAt > g.latestScan) g.latestScan = e.firstSeenAt;
+      groups.set(key, g);
+    }
+    return [...groups.entries()]
+      .map(([topicRoot, g]) => ({ topicRoot, count: g.count, latestScan: g.latestScan }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * 树节点折叠状态变化时由 view 回调:
+   * 更新内存并写盘。debounce 由 view 控制(用户在画布上连续点折叠是高频操作)。
+   */
+  async setLinkTreeCollapsed(topicRoot: string, collapsed: string[]): Promise<void> {
+    if (collapsed.length === 0) {
+      delete this.linkTreeCollapsed[topicRoot];
+    } else {
+      this.linkTreeCollapsed[topicRoot] = collapsed;
+    }
+    await this.saveSettings();
+  }
+
+  /** 给 view 读取折叠状态(初始化时用) */
+  getLinkTreeCollapsed(topicRoot: string): string[] {
+    return this.linkTreeCollapsed[topicRoot] ?? [];
   }
 
   /** 获取 MergedView 实例 */
@@ -264,6 +372,13 @@ export default class LocalRunnerPlugin extends Plugin {
 
   /** 视图初始化参数 */
   private buildMergedViewOptions(): MergedViewOptions {
+    // active topicRoot 决定给 view 传哪个主题的折叠状态
+    const activePath = (() => {
+      const leaves = this.app.workspace.getLeavesOfType(MERGED_VIEW_TYPE);
+      const md = this.app.workspace.getActiveViewOfType(MarkdownView);
+      return md?.file?.path ?? null;
+    })();
+    const activeTopicRoot = this.findTopicRootFor(activePath);
     return {
       defaultCwd: this.getDefaultCwd(),
       settings: this.settings,
@@ -276,8 +391,51 @@ export default class LocalRunnerPlugin extends Plugin {
         void this.saveSettings();
       },
       getLinkTreeEvents: () => this.linkTreeEvents,
-      onProcessStart: (tab) => this.onProcessStart(tab),
+      onTreeScan: (activePath) => this.onTreeScanClicked(activePath),
+      getCollapsed: () =>
+        activeTopicRoot ? this.getLinkTreeCollapsed(activeTopicRoot) : [],
+      onCollapsedChange: (topicRoot, collapsed) => {
+        void this.setLinkTreeCollapsed(topicRoot, collapsed);
+      },
+      // 进程成功退出 + 启用 rescanOnExit 时,触发自动重新扫描
+      onProcessExit: (tab) => this.handleProcessExit(tab),
     };
+  }
+
+  /**
+   * 进程退出处理:
+   * 1. 如果 tab.rescanOnExit && tab.status==exited-ok && tab.rescanTargetPath
+   *    → 调 onTreeScanClicked 重新扫描启动时记录的活动笔记
+   * 2. 通知 merged-view 树已更新
+   */
+  private async handleProcessExit(tab: { rescanOnExit?: boolean; rescanTargetPath?: string; status?: string }): Promise<void> {
+    if (!tab.rescanOnExit || tab.status !== "exited-ok" || !tab.rescanTargetPath) {
+      return;
+    }
+    try {
+      const result = await scanActiveNoteTopic(this.app, tab.rescanTargetPath);
+      const filtered = removeEventsByTopicRoot(this.linkTreeEvents, result.topicRoot);
+      this.linkTreeEvents = appendEvents(filtered, result.events).events;
+      await this.saveSettings();
+      new Notice(`✅ 进程退出后自动重新生成 ${result.nodeCount} 节点的双链树`);
+    } catch (e) {
+      console.warn("[rescanOnExit] scan failed", e);
+      new Notice(`❌ 自动重新扫描失败: ${(e as Error).message}`);
+    }
+  }
+
+  /** 根据 active 笔记路径算出 topicRoot(纯查表,不读 vault) */
+  private findTopicRootFor(activePath: string | null): string | null {
+    if (!activePath) return null;
+    const basename = activePath.split("/").pop()?.replace(/\.md$/i, "") ?? "";
+    // 从已加载的事件找 topicRoot(避免重复构建 graph)
+    const hit = this.linkTreeEvents.find(
+      (e) => e.topicRoot && e.target === basename,
+    );
+    if (hit?.topicRoot) return hit.topicRoot;
+    // fallback: 用 graph 算
+    const graph = buildBklinkGraph(this.app);
+    return findTopicRoot(basename, graph);
   }
 
   /** 尝试从 vault 级备份恢复 */
@@ -307,7 +465,6 @@ function shallowEqualGroups(
     if (x.name !== y.name) return false;
     if (x.command !== y.command) return false;
     if ((x.cwd ?? "") !== (y.cwd ?? "")) return false;
-    if ((x.snapshotEnabled ?? false) !== (y.snapshotEnabled ?? false)) return false;
   }
   return true;
 }

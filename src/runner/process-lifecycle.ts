@@ -17,10 +17,14 @@ export type ProcChangeKind = "data" | "status";
  *
  * 使用 `shell: true`:一是让 Windows 上的 .cmd 垫片(npm/npx)正常解析,
  * 二是允许用户输入任意 shell 命令(管道、参数等)。
+ *
+ * @param onExit 可选回调:进程成功退出时触发(exitCode=0),
+ *                  接收 RunnerTab 供 caller 读取 tab.rescanOnExit 等字段。
  */
 export function startProcess(
   tab: RunnerTab,
   onChange: (kind: ProcChangeKind) => void,
+  onExit?: (tab: RunnerTab) => void | Promise<void>,
 ): void {
   if (tab.child) {
     return;
@@ -86,6 +90,10 @@ export function startProcess(
       tab.child = null;
       const reason = signal ? `信号 ${signal}` : `代码 ${code}`;
       appendOutput(tab, `\n[进程退出,${reason}]\n`);
+      // 成功退出 + 启用 rescanOnExit 时通知 caller(异步,不阻塞状态变更)
+      if (tab.status === "exited-ok" && onExit) {
+        void Promise.resolve(onExit(tab));
+      }
     } else {
       tab.child = null;
     }

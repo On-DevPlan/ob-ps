@@ -9,7 +9,31 @@ export interface ResolvedRecentSectionHost {
   notifyResolvedLimitChanged?: () => void;
 }
 
-/** 渲染「最新已解析双链数量」滑块设置项 */
+/** 已解析双链数量允许的最小值 */
+export const MIN_RESOLVED_RECENT_LIMIT = 1;
+/** 已解析双链数量允许的最大值 */
+export const MAX_RESOLVED_RECENT_LIMIT = 50;
+
+/**
+ * 解析用户输入:必须是整数串(可带负号),否则返回 null。
+ * clamp 由调用方负责。
+ */
+export function parseResolvedRecentLimit(raw: string): number | null {
+  if (raw === "") return null;
+  if (!/^-?\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n)) return null;
+  return n;
+}
+
+/** 把值夹到 [MIN, MAX] */
+function clampResolvedRecentLimit(n: number): number {
+  if (n < MIN_RESOLVED_RECENT_LIMIT) return MIN_RESOLVED_RECENT_LIMIT;
+  if (n > MAX_RESOLVED_RECENT_LIMIT) return MAX_RESOLVED_RECENT_LIMIT;
+  return n;
+}
+
+/** 渲染「最新已解析双链数量」数值输入设置项 */
 export function render(
   containerEl: HTMLElement,
   host: ResolvedRecentSectionHost,
@@ -17,12 +41,23 @@ export function render(
   new Setting(containerEl)
     .setName("最新已解析双链数量")
     .setDesc("侧边栏「最新已解析双链」区块显示的条数(按目标去重、按创建时间倒序)")
-    .addSlider((s) => {
-      s.setLimits(1, 50, 1)
-        .setValue(host.settings.resolvedRecentLimit)
-        .onChange((v) => {
-          host.settings.resolvedRecentLimit = v;
-          void host.saveSettings().then(() => host.notifyResolvedLimitChanged?.());
+    .addText((text) => {
+      text
+        .setPlaceholder(`${MIN_RESOLVED_RECENT_LIMIT}-${MAX_RESOLVED_RECENT_LIMIT}`)
+        .setValue(String(host.settings.resolvedRecentLimit))
+        .onChange((raw) => {
+          const parsed = parseResolvedRecentLimit(raw);
+          if (parsed === null) {
+            // 非法输入:保留之前的值,既不写 settings 也不触发保存/通知。
+            return;
+          }
+          const next = clampResolvedRecentLimit(parsed);
+          host.settings.resolvedRecentLimit = next;
+          // 把夹紧后的值回写到输入框,保证 UI 与持久值一致。
+          text.setValue(String(next));
+          void host
+            .saveSettings()
+            .then(() => host.notifyResolvedLimitChanged?.());
         });
     });
 }

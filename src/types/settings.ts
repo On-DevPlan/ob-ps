@@ -24,6 +24,12 @@ export interface PluginSettings {
   resolvedRecentLimit: number;
   /** 用户定义的命令组,用于快捷填充新建表单 */
   commandGroups: CommandGroup[];
+  /**
+   * 设置页用户上次选中的 tab(proc / wl / skill)。
+   * 缺省或非法值由 LocalRunnerSettingTab 通过 normalizeActiveTab
+   * 兜底为 DEFAULT_TAB,不在此处写死。
+   */
+  settingsActiveTab?: import("../settings-tab/tabs").SettingsTabId;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {

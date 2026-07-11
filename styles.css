@@ -82,23 +82,24 @@
   gap: 6px;
   padding: 8px 12px 6px;
 }
-/* Zone 2: wli — fills remaining space */
+/* Zone 2: combined wikilink list — fills remaining space */
 .merged-zone-wli {
   flex: 1 1 0;
-  min-height: 80px;
+  min-height: 120px;
   gap: 2px;
 }
 .merged-zone-wli.is-shrunk {
   flex: none;
 }
-/* Zone 2.5: 最新已解析双链 — 有界高度,不与未解析区块争 flex 空间 */
-.merged-zone-wli-resolved {
-  flex: none;
+/* Zone 2.5: independent wikilink tree — hidden state removes entire module */
+.merged-zone-tree {
+  flex: 0 0 280px;
+  min-height: 220px;
   max-height: 38%;
   gap: 2px;
 }
-.merged-zone-wli-resolved.is-shrunk {
-  flex: none;
+.merged-zone-tree.is-hidden {
+  display: none;
 }
 /* Zone 3: proc — fills remaining space when visible */
 .merged-zone-proc {
@@ -254,34 +255,55 @@
   flex: 1;
 }
 
-/* ===== WLI content (zone 2) ===== */
+/* ===== WLI content (combined unresolved + resolved list) ===== */
 .zone-wli-body {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 8px;
   margin-top: 2px;
 }
 .zone-wli-body.is-collapsed {
   display: none;
 }
+.wli-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+}
+.wli-subsection-title {
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 5px 2px;
+}
 
+/* ===== Independent wikilink tree zone ===== */
+.zone-tree-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+}
+.zone-tree-body.is-collapsed {
+  display: none;
+}
 /* ===== 完善历史树 canvas 容器 ===== */
 .wli-tree-container {
-  flex-shrink: 0;
+  flex: 1;
   width: 100%;
-  min-height: 300px;
-  max-height: 500px;
+  min-height: 0;
   background: #ffffff;
   border-radius: 8px;
-  margin-top: 6px;
   position: relative;
   overflow: hidden;
   border: 1px solid var(--background-modifier-border);
-}
-.wli-tree-container.is-hidden {
-  display: none;
 }
 .wli-tree-container canvas {
   display: block;
@@ -294,6 +316,37 @@
 }
 .theme-dark .wli-tree-container {
   background: var(--background-primary-alt);
+}
+/* ===== Tree loading overlay (spinner) ===== */
+.tree-loading-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.6);
+  z-index: 2;
+  border-radius: 8px;
+}
+.theme-dark .tree-loading-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+.wli-tree-container.is-loading .tree-loading-overlay {
+  display: flex;
+}
+.wli-tree-container.is-loading canvas {
+  opacity: 0.3;
+}
+.tree-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--background-modifier-border);
+  border-top-color: var(--lr-accent);
+  border-radius: 50%;
+  animation: tree-spin 0.8s linear infinite;
+}
+@keyframes tree-spin {
+  to { transform: rotate(360deg); }
 }
 
 .wli-empty {
@@ -998,4 +1051,110 @@ body.ob-ps-hl-wl.ob-ps-hl-wl .cm-s-obsidian span.cm-hmd-barelink.cm-link {
 /* Generic hide helper */
 .is-hidden {
   display: none;
+}
+
+/* ===== Tree scan icon button (header right) ===== */
+.tree-scan-btn {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+.tree-scan-btn:hover {
+  background: var(--lr-accent-soft);
+  color: var(--lr-accent);
+}
+.tree-scan-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.tree-scan-btn[disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ===== LinkTree section (default folded) ===== */
+.lr-linktree-details {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 12px;
+}
+.lr-linktree-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  list-style: none;
+  user-select: none;
+}
+.lr-linktree-summary::-webkit-details-marker {
+  display: none;
+}
+.lr-linktree-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 0.15s;
+}
+.lr-linktree-details[open] > .lr-linktree-summary::before {
+  transform: rotate(90deg);
+}
+.lr-linktree-summary-stat {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: var(--font-ui-small);
+}
+.lr-linktree-body {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* ===== Settings tab bar ===== */
+.lr-tab-bar {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.lr-tab-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 12px 16px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  margin-bottom: -1px;
+  transition: color 0.15s ease;
+}
+.lr-tab-btn:hover { color: var(--text-normal); }
+.lr-tab-btn.is-active {
+  color: var(--interactive-accent);
+  border-bottom-color: var(--interactive-accent);
+}
+.lr-tab-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
 }
