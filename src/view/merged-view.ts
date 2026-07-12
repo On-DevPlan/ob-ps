@@ -20,6 +20,7 @@ import { TreeLinkView } from "../link-tree/link-tree-view";
 import { filterByActiveNote } from "../link-tree/link-tree-view";
 import type { CreationEvent } from "../link-tree/creation-event";
 import { applyTreeZoneVisibility } from "./tree-zone-visibility";
+import { toggleTreeBody } from "./tree-zone-body";
 
 export const MERGED_VIEW_TYPE = "merged-runner-inspector-view";
 
@@ -97,6 +98,8 @@ export class MergedRunnerInspectorView extends ItemView {
   private treeContainerEl!: HTMLElement;
   private treeLoadingEl!: HTMLElement;
   private treeContainerVisible = false;
+  private treeBodyCollapsed = false;       // internal body collapse — independent of treeContainerVisible
+  private treeChevronEl!: HTMLElement;     // head chevron — cached for setIcon in toggleTreeBody
   private treeToggleBtnEl!: HTMLElement;
   private treeScanBtnEl!: HTMLElement;
 
@@ -432,6 +435,7 @@ export class MergedRunnerInspectorView extends ItemView {
     const head = this.treeZoneEl.createDiv({ cls: "zone-head" });
     const chevron = head.createDiv({ cls: "zone-head-cv" });
     setIcon(chevron, "chevron-down");
+    this.treeChevronEl = chevron;
     head.createSpan({ cls: "zone-head-title", text: "双链树" });
     this.treeScanBtnEl = head.createDiv({
       cls: "tree-scan-btn clickable-icon",
@@ -458,7 +462,21 @@ export class MergedRunnerInspectorView extends ItemView {
     this.treeLoadingEl = this.treeContainerEl.createDiv({ cls: "tree-loading-overlay" });
     this.treeLoadingEl.createDiv({ cls: "tree-spinner" });
 
-    head.addEventListener("click", () => this.toggleTreeContainer());
+    // Head click collapses ONLY the canvas body — zone stays in layout
+    // (and also shrinks to head-only height via toggleTreeBody's treeZoneEl dep).
+    // Scan button's click handler calls e.stopPropagation() so it never reaches here.
+    head.addEventListener("click", (e) => {
+      if (this.treeScanBtnEl.contains(e.target as Node)) return;
+      this.treeBodyCollapsed = toggleTreeBody(
+        { collapsed: this.treeBodyCollapsed },
+        {
+          bodyEl: this.treeBodyEl,
+          chevronEl: this.treeChevronEl,
+          setIcon,
+          treeZoneEl: this.treeZoneEl,
+        },
+      ).collapsed;
+    });
     applyTreeZoneVisibility({
       treeZoneEl: this.treeZoneEl,
       toggleBtnEl: this.treeToggleBtnEl,
@@ -488,7 +506,7 @@ export class MergedRunnerInspectorView extends ItemView {
       this.toggleTreeContainer();
     }
 
-    this.treeScanBtnEl.setAttr("disabled", "true");
+    this.treeScanBtnEl.toggleClass("is-loading", true);
     this.treeContainerEl.addClass("is-loading");
     try {
       await this.opts.onTreeScan(activePath);
@@ -510,7 +528,7 @@ export class MergedRunnerInspectorView extends ItemView {
       console.warn("[scan] tree scan failed", err);
     } finally {
       this.treeContainerEl.removeClass("is-loading");
-      this.treeScanBtnEl.removeAttribute("disabled");
+      this.treeScanBtnEl.toggleClass("is-loading", false);
     }
   }
 

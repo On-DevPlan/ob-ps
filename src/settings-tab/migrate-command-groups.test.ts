@@ -13,8 +13,8 @@ describe("migrateCommandGroups", () => {
     ];
     const out = migrateCommandGroups(input);
     expect(out).toEqual([
-      { id: "g1", name: "dev", command: "npm run dev", cwd: "", visible: true },
-      { id: "g2", name: "build", command: "npm run build", cwd: "/abs", visible: true },
+      { id: "g1", name: "dev", command: "npm run dev", cwd: "", visible: true, rescanOnExit: false },
+      { id: "g2", name: "build", command: "npm run build", cwd: "/abs", visible: true, rescanOnExit: false },
     ]);
   });
 
@@ -24,7 +24,7 @@ describe("migrateCommandGroups", () => {
     ];
     const out = migrateCommandGroups(input);
     expect(out).toEqual([
-      { id: "g1", name: "dev", command: "npm run dev", cwd: "", visible: false },
+      { id: "g1", name: "dev", command: "npm run dev", cwd: "", visible: false, rescanOnExit: false },
     ]);
   });
 
@@ -119,5 +119,49 @@ describe("migrateCommandGroups", () => {
     ];
     const out = migrateCommandGroups(input);
     expect(new Set(out.map((g) => g.id)).size).toBe(out.length);
+  });
+
+  it("新形状保留 rescanOnExit:true", () => {
+    // 回归:启动时 migrate 会重塑每个 group,rescanOnExit 必须被显式复制,
+    // 否则设置页 checkbox 永远显示为 unchecked,用户的「进程退出后自动重新扫描」失效。
+    const input = [
+      { id: "g1", name: "dev", command: "npm run dev", cwd: "", rescanOnExit: true },
+    ];
+    const out = migrateCommandGroups(input);
+    expect(out[0].rescanOnExit).toBe(true);
+  });
+
+  it("新形状保留 rescanOnExit:false", () => {
+    const input = [
+      { id: "g1", name: "dev", command: "npm run dev", cwd: "", rescanOnExit: false },
+    ];
+    const out = migrateCommandGroups(input);
+    expect(out[0].rescanOnExit).toBe(false);
+  });
+
+  it("新形状缺 rescanOnExit 时归一为 false", () => {
+    // 显式归一避免 undefined 漂移;UI 读 rescanOnExit ?? false 也好,
+    // 显式 false 让数据形状稳定。
+    const input = [
+      { id: "g1", name: "dev", command: "npm run dev", cwd: "" },
+    ];
+    const out = migrateCommandGroups(input);
+    expect(out[0].rescanOnExit).toBe(false);
+  });
+
+  it("旧形状 preset 若带 rescanOnExit 也保留", () => {
+    // 防御:旧 preset 数组里若曾临时存过 rescanOnExit(开发期调试),
+    // 升级路径不应丢失用户的选择。
+    const input = [
+      {
+        id: "old1",
+        name: "fallback",
+        presets: [
+          { name: "a", command: "cmd-a", cwd: "", rescanOnExit: true },
+        ],
+      },
+    ];
+    const out = migrateCommandGroups(input);
+    expect(out[0].rescanOnExit).toBe(true);
   });
 });

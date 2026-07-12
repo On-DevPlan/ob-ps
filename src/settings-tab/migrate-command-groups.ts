@@ -6,6 +6,7 @@ interface LegacyPreset {
   name?: string;
   command?: string;
   cwd?: string;
+  rescanOnExit?: unknown;
 }
 
 /** 旧形状的组(运行时检测用) */
@@ -50,10 +51,15 @@ export function migrateCommandGroups(input: unknown): CommandGroup[] {
           name,
           command,
           cwd: (p.cwd ?? "").trim(),
+          // 旧 preset 若曾带 rescanOnExit(如开发中临时存的字段)也保留;
+          // 严格归一为 boolean,避免 undefined 漂移。
+          rescanOnExit: p.rescanOnExit === true,
         });
       }
     } else {
       // 新形状:直接取字段,缺失则空。
+      // 必须显式复制 rescanOnExit,否则每次 onload 跑 migrate 都会把它丢掉,
+      // 设置页 checkbox 会显示 unchecked(磁盘上是 true 但内存对象没了字段)。
       const cg = g as Partial<CommandGroup>;
       result.push({
         id: (cg.id ?? nextGroupId()).toString() || nextGroupId(),
@@ -61,6 +67,7 @@ export function migrateCommandGroups(input: unknown): CommandGroup[] {
         command: (cg.command ?? "").toString(),
         cwd: (cg.cwd ?? "").toString(),
         visible: cg.visible !== false,
+        rescanOnExit: cg.rescanOnExit === true,
       });
     }
   }

@@ -6,20 +6,15 @@
   height: 100%;
 }
 
-/* ===== Merged View ===== */
-.merged-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-  background: var(--lr-bg-panel);
-}
-
 /* ===== Design tokens =======================================================
  * 干净工业风: 柔和卡片 + 大圆角 + 靛蓝强调, 但更克制的间距和更精致的细节。
  * 全部映射 Obsidian 变量以保证亮/暗主题自适应。
+ *
+ * 之所以在 :root / .theme-dark 而非 .merged-view 中声明:
+ * .merged-view 只覆盖左侧 runner sidebar;Settings tab 渲染在
+ * Obsidian 的 .vertical-tab-content(兄弟 DOM 分支),必须能继承到这些 token。
  * ======================================================================== */
-.merged-view {
+:root {
   --lr-radius-card: 10px;
   --lr-radius-control: 8px;
   --lr-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.05);
@@ -31,13 +26,22 @@
   --lr-bg-panel: var(--background-secondary);
   --lr-tracking: 0.3px;
 }
-.theme-dark .merged-view {
+.theme-dark {
   --lr-accent: #818cf8;
   --lr-accent-hover: #a5b4fc;
   --lr-accent-soft: rgba(129, 140, 248, 0.1);
   --lr-accent-mid: rgba(129, 140, 248, 0.2);
   --lr-shadow-card: 0 2px 16px rgba(0, 0, 0, 0.4);
   --lr-shadow-card-hover: 0 6px 24px rgba(0, 0, 0, 0.55);
+}
+
+/* ===== Merged View ===== */
+.merged-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--lr-bg-panel);
 }
 
 /* ===== Header ===== */
@@ -82,10 +86,12 @@
   gap: 6px;
   padding: 8px 12px 6px;
 }
-/* Zone 2: combined wikilink list — fills remaining space */
+/* Zone 2: combined wikilink list — content-driven height.
+   flex 0 1 auto lets the zone shrink to its content; min-height 0 lets
+   an empty list collapse instead of leaving a blank gap below the row. */
 .merged-zone-wli {
-  flex: 1 1 0;
-  min-height: 120px;
+  flex: 0 1 auto;
+  min-height: 0;
   gap: 2px;
 }
 .merged-zone-wli.is-shrunk {
@@ -93,13 +99,20 @@
 }
 /* Zone 2.5: independent wikilink tree — hidden state removes entire module */
 .merged-zone-tree {
-  flex: 0 0 280px;
+  flex: 0 0 420px;
   min-height: 220px;
-  max-height: 38%;
+  max-height: 55%;
   gap: 2px;
 }
 .merged-zone-tree.is-hidden {
   display: none;
+}
+/* Shrink-to-content when body is collapsed via the chevron.
+   Mirrors .merged-zone-wli.is-shrunk — same pattern across sidebar zones. */
+.merged-zone-tree.is-shrunk {
+  flex: none;
+  min-height: 0;
+  max-height: none;
 }
 /* Zone 3: proc — fills remaining space when visible */
 .merged-zone-proc {
@@ -1075,9 +1088,14 @@ body.ob-ps-hl-wl.ob-ps-hl-wl .cm-s-obsidian span.cm-hmd-barelink.cm-link {
   width: 13px;
   height: 13px;
 }
-.tree-scan-btn[disabled] {
+/* Loading state — replaces the prior [disabled] attribute toggle.
+   Using a class matches the convention used elsewhere in the sidebar
+   (.is-active, .is-hidden, .is-collapsed) and is verifiable in jsdom. */
+.tree-scan-btn.is-loading {
   opacity: 0.5;
   pointer-events: none;
+  background: var(--lr-accent-soft);
+  color: var(--lr-accent);
 }
 
 /* ===== LinkTree section (default folded) ===== */
@@ -1124,29 +1142,28 @@ body.ob-ps-hl-wl.ob-ps-hl-wl .cm-s-obsidian span.cm-hmd-barelink.cm-link {
 .lr-tab-bar {
   display: flex;
   gap: 4px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
+  padding-bottom: 15px;
 }
 .lr-tab-btn {
   appearance: none;
   background: transparent;
   border: 0;
   border-bottom: 2px solid transparent;
-  padding: 12px 16px;
+  padding: 8px 14px;
   color: var(--text-muted);
   font-family: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  letter-spacing: 0.3px;
-  margin-bottom: -1px;
-  transition: color 0.15s ease;
+  letter-spacing: 0;
+  transition: color 0.12s ease, border-color 0.12s ease;
 }
-.lr-tab-btn:hover { color: var(--text-normal); }
+.lr-tab-btn:hover {
+  color: var(--text-normal);
+}
 .lr-tab-btn.is-active {
-  color: var(--interactive-accent);
-  border-bottom-color: var(--interactive-accent);
+  color: var(--lr-accent);
+  border-bottom-color: var(--lr-accent);
 }
 .lr-tab-badge {
   display: inline-block;

@@ -18,8 +18,8 @@ Run local shell commands from an Obsidian sidebar tab and stream their output li
 ### Wikilink tooling
 - **Unresolved-wikilink list** — the upper section of the sidebar lists every unresolved `[[ ]]` link, newest source note first, with incremental load-more.
 - **Clear unresolved links** — the eraser button converts every unresolved `[[x]]` in the vault to `[x]` after a confirmation prompt. A separate command flattens only the current note's wikilinks.
-- **Snapshot on start** — tick "snapshot unresolved wikilinks on start" on a command; when it launches, the plugin records every currently-unresolved wikilink into the repair tree.
-- **Repair-history tree** — a pannable, zoomable canvas (the **tree** button) visualizes every snapshot. Click a node to jump to its source note; the canvas auto-highlights the note you currently have open.
+- **Auto-rescan on process exit** — per-command checkbox "rescan wikilink tree when the process exits successfully"; when the command finishes with exit code 0, the plugin re-scans the note that was active when the process was launched and refreshes the wikilink tree for its topic. Off by default (opt-in) to avoid hammering the vault for long-lived processes like a dev server.
+- **Repair-history tree** — a pannable, zoomable canvas (the **tree** button) visualizes every vault scan. Open the tree zone and click its `list-tree` icon to scan the topic rooted at the current note (computed by walking the `bklink` frontmatter chain upward until a node with no incoming bklink is found); the canvas auto-highlights the note you currently have open, click a node to jump to its source note. Node collapse state is persisted per topic.
 - **Highlight wikilinks** — optionally style internal links by resolution state, with configurable colors for resolved and unresolved links in both light and dark themes.
 
 ### Data and persistence
@@ -46,21 +46,28 @@ Run local shell commands from an Obsidian sidebar tab and stream their output li
 ## Usage
 
 1. **Open the sidebar** — command palette → "Open sidebar", or click the play icon in the left ribbon.
-2. **Add a command** — Settings → Local Runner → Command groups → **+ New**. Fill in a name, the shell command, and optionally a working directory. A quick-launch button for it then appears in the sidebar.
+2. **Add a command** — Settings → Local Runner → **Process** tab → **Command groups** → **+ New**. Fill in a name, the shell command, and optionally a working directory. A quick-launch button for it then appears in the sidebar.
 3. **Start and stop** — click the command's button in the quick-launch bar.
 4. **Read logs** — click the **Log** button to reveal the terminal-output section, then click a process card to expand its log.
 5. **Inspect wikilinks** — the upper section lists unresolved links. Click the eraser to clear all of them across the vault, or use the command palette to flatten the current note's links.
-6. **Capture a snapshot** — tick "snapshot unresolved wikilinks on start" on a command; on the next launch, unresolved links are recorded into the repair tree.
-7. **Open the repair tree** — click the **tree** button. Drag to pan, scroll to zoom, double-click to fit, click a node to jump to its source note.
+6. **Generate the wikilink tree** — click the **tree** button in the utility row to reveal the tree zone, then click the zone's `list-tree` icon to scan the topic rooted at the currently active note. The result renders as a pannable canvas.
+7. **Inspect the wikilink tree** — drag to pan, scroll to zoom, double-click to fit, click a node to jump to its source note.
 
 ## Settings
 
-Settings → Local Runner:
+Settings → Local Runner is split into three tabs.
 
-- **Install skill from remote repo** — paste a `degit` source (`owner/repo/skills/<dir>#<ref>`) to install a skill into the vault's `.claude/skills/`; remove an installed skill with its per-row button.
-- **Highlight wikilinks** — toggle internal-link highlighting, and pick colors for resolved and unresolved links in light and dark themes.
+### Process tab
 - **Keep data on uninstall** — when enabled (default), commands and settings are also backed up into the vault and restored on reinstall; turning it off deletes the existing backup.
-- **Command groups** — manage the quick-launch commands: name, command, working directory, visibility, and the snapshot-on-start toggle.
+- **Command groups** — manage the quick-launch commands: name, command, working directory, visibility, and the auto-rescan-on-exit toggle.
+
+### Wikilink tab
+- **Highlight wikilinks** — toggle internal-link highlighting, and pick colors for resolved and unresolved links in light and dark themes.
+- **Resolved-recent limit** — how many of the most recently resolved wikilinks the sidebar shows (1–50). Deduplicated by target and ordered by source-note ctime.
+- **Wikilink-tree data** (collapsed by default) — grouped statistics of scan events by topic root, with a delete button per topic and a clear-all action. Use this to purge legacy events or wipe the tree history.
+
+### Skill tab
+- **Install skill from remote repo** — paste a `degit` source (`owner/repo/skills/<dir>#<ref>`) to install a skill into the vault's `.claude/skills/`; remove an installed skill with its per-row button.
 
 ## Commands
 - **Open sidebar** — reveal the Local Runner panel.
