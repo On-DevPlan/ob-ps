@@ -4,10 +4,11 @@ import type { CommandGroup } from "../types/commands";
 import type { PluginSettings } from "../types/settings";
 import {
   isRunning,
+  launchProcess,
+  pickFirstVisibleGroup,
   resolveOrCreateTab,
   type ProcChangeKind,
   type RunnerTab,
-  startProcess,
   stopProcess,
 } from "../runner";
 import { collectRows } from "../wikilink-inspector/link-collector";
@@ -17,6 +18,7 @@ import { ClearUnresolvedConfirmModal } from "../wikilink-inspector/clear-unresol
 import { makeUnresolvedSource } from "../wikilink-inspector/clear-unresolved";
 import { type FormMode } from "./process-form";
 import { TreeLinkView } from "../link-tree/link-tree-view";
+import { refreshLinkTree } from "../link-tree/refresh-link-tree";
 import { filterByActiveNote } from "../link-tree/link-tree-view";
 import type { CreationEvent } from "../link-tree/creation-event";
 import { applyTreeZoneVisibility } from "./tree-zone-visibility";
@@ -193,6 +195,19 @@ export class MergedRunnerInspectorView extends ItemView {
     this.refreshQuickBar();
   }
 
+  /** linkTreeEvents 改动后按当前活动笔记立即重投影 Canvas。 */
+  notifyLinkTreeChanged(): void {
+    const activePath = this.getActiveNotePath();
+    refreshLinkTree({
+      events: this.opts.getLinkTreeEvents(),
+      activePath,
+      graph: buildBklinkGraph(this.app),
+      filter: filterByActiveNote,
+      update: (events, path) => this.treeView.updateFromApp(events, this.app, path),
+      onError: (error) => console.warn("[link-tree] update failed", error),
+    });
+  }
+
   /**
    * 把 tabs 与 commandGroups(visible:true)双向同步:
    *
@@ -230,12 +245,13 @@ export class MergedRunnerInspectorView extends ItemView {
       this.tabs = this.tabs.filter((t) => !orphanIds.has(t.id));
     }
 
-    // 2) 同步字段:每个保留 tab 从对应可见命令组拉 name / cwd
+    // 2) 同步字段:每个保留 tab 从对应可见命令组拉 name / cwd / rescanOnExit
     for (const tab of this.tabs) {
       const g = firstVisibleByCommand.get(tab.command);
       if (!g) continue; // 上面已过滤,这里不该发生,但防御性兜底
       tab.name = g.name;
       tab.cwd = g.cwd;
+      tab.rescanOnExit = g.rescanOnExit === true;
     }
 
     this.saveConfigs();
@@ -272,17 +288,24 @@ export class MergedRunnerInspectorView extends ItemView {
       this.saveConfigs();
       this.renderProcAll();
     }
-    tab.output = "";
-    // 记录启动时的活动笔记路径,rescanOnExit 触发时扫描这个笔记
-    // (避免进程跑完时用户已切到别处导致扫错)
-    tab.rescanTargetPath = this.getActiveNotePath() ?? undefined;
-    startProcess(
-      tab,
-      (kind) => this.onProcChange(tab.id, kind),
-      // 成功退出 + 启用 rescanOnExit 时,通知 main.ts 触发重新扫描
-      (t) => this.opts.onProcessExit?.(t),
-    );
+    this.launchTab(tab);
     return tab;
+  }
+
+  /**
+   * 统一执行一次进程启动:同步当前 command group 字段、记录扫描目标、
+   * 始终注册 onProcessExit 回调。首次创建与退出/停止后重启共用此入口,
+   * 避免「重复运行时丢失退出回调」导致自动重新扫描失效。
+   */
+  private launchTab(tab: RunnerTab): void {
+    launchProcess({
+      tab,
+      group: pickFirstVisibleGroup(this.opts.settings.commandGroups ?? [], tab.command),
+      activeNotePath: this.getActiveNotePath(),
+      defaultCwd: this.opts.defaultCwd,
+      onChange: (kind) => this.onProcChange(tab.id, kind),
+      onExit: (t) => this.opts.onProcessExit?.(t),
+    });
   }
 
   findTabByCommand(command: string): RunnerTab | null {
@@ -934,10 +957,9 @@ export class MergedRunnerInspectorView extends ItemView {
       return;
     }
 
-    // exited-* / stopped → 直接启动;startProcess 入口处的 child 空判断与 generation
-    // 自增保证了旧子进程(exited-* 路径 close 回调里已 tab.child=null)不会污染新进程。
-    tab.output = "";
-    startProcess(tab, (kind) => this.onProcChange(tab.id, kind));
+    // exited-* / stopped → 经统一 launchTab 启动;startProcess 入口处的 child 空判断
+    // 与 generation 自增保证旧子进程不会污染新进程,launchTab 保证退出回调已注册。
+    this.launchTab(tab);
   }
 
   // ---- 辅助方法 --------------------------------------------------------------

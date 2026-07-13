@@ -88,11 +88,12 @@ export function render(containerEl: HTMLElement, host: LinkTreeSectionHost): voi
   if (total > 0) {
     new Setting(body)
       .setName("清空所有双链树数据")
-      .setDesc("删除全部 linkTree 事件(包括所有主题 + legacy 残留)。此操作不可撤销。")
+      .setDesc("删除全部双链树事件(包括所有主题 + legacy 残留)。此操作不可撤销。")
       .addButton((b) => {
+        // setDestructive() 需 Obsidian 1.13+,高于本插件 minAppVersion 1.7.2。
+        b.buttonEl.addClass("mod-warning");
         b.setIcon("trash-2")
           .setButtonText("清空")
-          .setWarning()
           .onClick(async () => {
             const removed = await host.clearAllLinkTreeEvents();
             new Notice(`已清空 ${removed} 条事件`);
