@@ -28,7 +28,6 @@ interface MockFile {
 }
 
 function makeApp(files: MockFile[]): App {
-  const fileMap = new Map(files.map((f) => [f.basename, f]));
   return {
     vault: {
       getMarkdownFiles: () => files,
@@ -36,10 +35,7 @@ function makeApp(files: MockFile[]): App {
         files.find((f) => f.path === p) ?? null,
     },
     metadataCache: {
-      getFileCache: (file: unknown) => {
-        const f = file as MockFile;
-        return { frontmatter: null };
-      },
+      getFileCache: (_file: unknown) => ({ frontmatter: null }),
     },
   } as unknown as App;
 }

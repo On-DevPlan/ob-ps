@@ -27,7 +27,7 @@ interface AppWithSetting {
 interface PluginData {
   /** schema 版本(v2:加 schemaVersion + 删除 processes) */
   schemaVersion?: number;
-  /** @deprecated v2 起移除。命令配置迁入 settings.commandGroups。*/
+  /** Legacy 兼容字段:仍用于恢复已保存的进程 tab 与卸载备份。 */
   processes?: ProcessConfig[];
   settings?: PluginSettings;
   linkTree?: { events: CreationEvent[]; version: number };
@@ -363,6 +363,19 @@ export default class LocalRunnerPlugin extends Plugin {
     }
   }
 
+  /** linkTreeEvents 改动后通知已打开的 merged-view 重绘 Canvas;不主动打开侧边栏。 */
+  notifyLinkTreeChanged(): void {
+    try {
+      const leaf = this.app.workspace.getLeavesOfType(MERGED_VIEW_TYPE)[0];
+      const view = leaf?.view;
+      if (view instanceof MergedRunnerInspectorView) {
+        view.notifyLinkTreeChanged();
+      }
+    } catch (e) {
+      console.warn("[link-tree] notify failed", e);
+    }
+  }
+
   /** 根据设置开关添加/移除高亮双链 body class */
   applyWikilinkStyle(): void {
     applyWikilinkStyle(this.settings);
@@ -374,7 +387,6 @@ export default class LocalRunnerPlugin extends Plugin {
   private buildMergedViewOptions(): MergedViewOptions {
     // active topicRoot 决定给 view 传哪个主题的折叠状态
     const activePath = (() => {
-      const leaves = this.app.workspace.getLeavesOfType(MERGED_VIEW_TYPE);
       const md = this.app.workspace.getActiveViewOfType(MarkdownView);
       return md?.file?.path ?? null;
     })();
@@ -417,6 +429,7 @@ export default class LocalRunnerPlugin extends Plugin {
       const filtered = removeEventsByTopicRoot(this.linkTreeEvents, result.topicRoot);
       this.linkTreeEvents = appendEvents(filtered, result.events).events;
       await this.saveSettings();
+      this.notifyLinkTreeChanged();
       new Notice(`✅ 进程退出后自动重新生成 ${result.nodeCount} 节点的双链树`);
     } catch (e) {
       console.warn("[rescanOnExit] scan failed", e);

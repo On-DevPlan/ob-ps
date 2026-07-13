@@ -12,3 +12,5 @@ export { stripAnsi } from "./ansi";
 export { isSuccessExit } from "./exit-code";
 export { startProcess, stopProcess } from "./process-lifecycle";
 export type { ProcChangeKind } from "./process-lifecycle";
+export { launchProcess, pickFirstVisibleGroup } from "./process-launch";
+export type { LaunchDeps } from "./process-launch";
