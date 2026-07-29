@@ -124,8 +124,22 @@ export class TreeLinkView {
     console.debug("[scan] TreeLinkView.update noteBasename=", noteBasename, "activeNoteTarget=", activeNoteTarget);
 
     this.canvas.setCollapsed(this.collapsed);
-    this.canvas.update(filtered, deps, activeNoteTarget);
+    this.canvas.update(filtered, deps, activeNoteTarget, this.currentTopicRoot);
     console.debug("[scan] TreeLinkView.update done");
+  }
+
+  /**
+   * 导出当前树图为文本。
+   * @param format "text" = 缩进树状文本;"mermaid" = graph TD 语法(粘到 .md 直接渲染)
+   * 无数据时返回 ""。
+   */
+  exportCurrentTree(format: "text" | "mermaid" = "text"): string {
+    return this.canvas.getSerializedTree(format);
+  }
+
+  /** 当前 canvas 是否有可导出的数据(>=1 个 layoutRoot) */
+  hasData(): boolean {
+    return this.canvas.currentLayoutRootCount() > 0;
   }
 
   /** 便捷版本：从 app 构建 deps */

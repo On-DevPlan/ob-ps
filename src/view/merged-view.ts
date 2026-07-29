@@ -104,6 +104,8 @@ export class MergedRunnerInspectorView extends ItemView {
   private treeChevronEl!: HTMLElement;     // head chevron — cached for setIcon in toggleTreeBody
   private treeToggleBtnEl!: HTMLElement;
   private treeScanBtnEl!: HTMLElement;
+  private treeExportBtnEl!: HTMLElement;
+  private treeExportMenuEl: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, opts: MergedViewOptions) {
     super(leaf);
@@ -469,6 +471,16 @@ export class MergedRunnerInspectorView extends ItemView {
       e.stopPropagation();
       void this.onTreeScanClick();
     });
+    // 导出按钮: 复制当前树图到剪贴板
+    this.treeExportBtnEl = head.createDiv({
+      cls: "tree-export-btn clickable-icon",
+      attr: { title: "复制当前树图到剪贴板" },
+    });
+    setIcon(this.treeExportBtnEl, "copy");
+    this.treeExportBtnEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.onTreeExportClick();
+    });
 
     this.treeBodyEl = this.treeZoneEl.createDiv({ cls: "zone-tree-body" });
     this.treeContainerEl = activeDocument.createElement("div");
@@ -490,6 +502,7 @@ export class MergedRunnerInspectorView extends ItemView {
     // Scan button's click handler calls e.stopPropagation() so it never reaches here.
     head.addEventListener("click", (e) => {
       if (this.treeScanBtnEl.contains(e.target as Node)) return;
+      if (this.treeExportBtnEl.contains(e.target as Node)) return;
       this.treeBodyCollapsed = toggleTreeBody(
         { collapsed: this.treeBodyCollapsed },
         {
@@ -552,6 +565,95 @@ export class MergedRunnerInspectorView extends ItemView {
     } finally {
       this.treeContainerEl.removeClass("is-loading");
       this.treeScanBtnEl.toggleClass("is-loading", false);
+    }
+  }
+
+  /**
+   * 导出按钮 handler:点 → 弹下拉菜单(矩阵 / 文字)→ 选完再走 exportFlow。
+   * 无数据时(没扫过 / canvas 未挂载)走「请先生成」分支。
+   */
+  private onTreeExportClick(): void {
+    const hasData = this.treeView.hasData();
+    if (!hasData) {
+      new Notice("⚠️ 当前没有树可导出,请先生成");
+      return;
+    }
+    this.toggleTreeExportMenu();
+  }
+
+  /**
+   * 切换下拉菜单显隐。点 export 按钮 toggle;点页面其他位置关闭。
+   * 菜单为绝对定位的小 div,2 行,带行 hover。
+   */
+  private toggleTreeExportMenu(force?: boolean): void {
+    if (this.treeExportMenuEl) {
+      // 已存在 → 关闭(除非外部显式要求 open)
+      if (force === true) return;
+      this.treeExportMenuEl.remove();
+      this.treeExportMenuEl = null;
+      activeDocument.removeEventListener("mousedown", this._treeExportDocClose, true);
+      return;
+    }
+    if (force === false) return;
+    this.openTreeExportMenu();
+  }
+
+  private openTreeExportMenu(): void {
+    const menu = activeDocument.createElement("div");
+    menu.className = "tree-export-menu";
+    const items: Array<{ label: string; format: "mermaid" | "text" }> = [
+      { label: "Mermaid", format: "mermaid" },
+      { label: "文字", format: "text" },
+    ];
+    for (const it of items) {
+      const row = menu.createDiv({ cls: "tree-export-menu-item", text: it.label });
+      row.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.toggleTreeExportMenu(false);
+        void this.exportFlow(it.format);
+      });
+    }
+    // 定位到按钮下方 —— 用 setCssProps 动态注入 top/left(避开 no-static-styles-assignment 规则)
+    const rect = this.treeExportBtnEl.getBoundingClientRect();
+    (menu as unknown as { setCssProps(props: Record<string, string>): void }).setCssProps({
+      top: `${rect.bottom + 2}px`,
+      left: `${rect.right - 120}px`,
+    });
+    activeDocument.body.appendChild(menu);
+    this.treeExportMenuEl = menu;
+    // 下一帧监听 doc click,点外面关闭
+    window.setTimeout(() => {
+      activeDocument.addEventListener("mousedown", this._treeExportDocClose, true);
+    }, 0);
+  }
+
+  /** 文档级 mousedown 关闭(点 export 按钮自身时由按钮 handler 接管) */
+  private _treeExportDocClose = (ev: MouseEvent): void => {
+    const target = ev.target as Node | null;
+    if (this.treeExportMenuEl && target && !this.treeExportMenuEl.contains(target)
+        && !this.treeExportBtnEl.contains(target)) {
+      this.toggleTreeExportMenu(false);
+    }
+  };
+
+  /**
+   * 实际写剪贴板 + Notice 反馈。导出按钮的 menu 选中后调用。
+   * @param format "mermaid" → graph TD;"text" → 缩进树状文本
+   */
+  async exportFlow(format: "mermaid" | "text"): Promise<void> {
+    const text = this.treeView.exportCurrentTree(format);
+    if (!text) {
+      new Notice("⚠️ 当前没有树可导出,请先生成");
+      return;
+    }
+    const lineCount = text.split("\n").filter((l) => l.length > 0).length;
+    const label = format === "mermaid" ? "Mermaid" : "文字";
+    try {
+      await navigator.clipboard.writeText(text);
+      new Notice(`✅ 已复制 ${label}格式 (${lineCount} 行) 到剪贴板`);
+    } catch (err) {
+      console.warn("[link-tree] clipboard write failed", err, "\n" + text);
+      new Notice("❌ 复制失败,文本已输出到控制台");
     }
   }
 

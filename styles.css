@@ -1098,6 +1098,53 @@ body.ob-ps-hl-wl.ob-ps-hl-wl .cm-s-obsidian span.cm-hmd-barelink.cm-link {
   color: var(--lr-accent);
 }
 
+/* ===== Tree export icon button (header right, next to scan) ===== */
+.tree-export-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.tree-export-btn:hover {
+  background: var(--lr-accent-soft);
+  color: var(--lr-accent);
+}
+.tree-export-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ===== Tree export dropdown menu ===== */
+.tree-export-menu {
+  min-width: 120px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  padding: 4px 0;
+  z-index: 1000;
+  font-size: var(--font-ui-small);
+  position: absolute;
+  /* top / left 由 setCssProps 动态注入(getBoundingClientRect) */
+}
+.tree-export-menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--text-normal);
+  user-select: none;
+}
+.tree-export-menu-item:hover {
+  background: var(--background-modifier-hover);
+  color: var(--lr-accent);
+}
+
 /* ===== LinkTree section (default folded) ===== */
 .lr-linktree-details {
   border: 1px solid var(--background-modifier-border);

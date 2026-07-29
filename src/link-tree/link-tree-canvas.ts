@@ -11,6 +11,149 @@ import { layoutTree, type LayoutNode } from "./tree-layout";
 import { projectTree, type TreeNode, type ProjectDeps } from "./tree-projector";
 import type { CreationEvent } from "./creation-event";
 
+// ---- 序列化(导出) ----
+
+/** serializeTreeToText 的输入 —— 与 canvas 内部状态对齐 */
+export interface SerializeInput {
+  /** 已被 canvas 拆分为 ghost + bare 的 layoutRoot 列表(可直接复用) */
+  layoutRoots: LayoutNode[];
+  /** 当前活跃主题根,用于 header。无则为 "untitled" */
+  topicRoot: string | null;
+}
+
+/**
+ * 把 layoutRoots 序列化为缩进树状文本(可粘贴到对话/笔记)。
+ *
+ * 格式:
+ *   主题: <topicRoot>
+ *
+ *   📁 <dir>(ghost 节点,代表一个 sourcePath)
+ *     - <child>...
+ *   📁 <dir2>
+ *     - ...
+ *   - <bare root>(无 ghost 包裹的普通根)
+ *     - <child>...
+ *
+ * - ghost 节点的 label 与 canvas 渲染一致: `id.split("/").pop()`(取最后一段)。
+ * - 普通节点用 `-` 前缀 + 2 空格/层缩进。
+ * - 折叠节点(id 在某棵子树里但 children 被折叠)末尾追加 `(N)`,N 为其子孙总数。
+ * - layoutRoot 之间空一行,便于肉眼扫。
+ */
+export function serializeTreeToText(input: SerializeInput): string {
+  const { layoutRoots, topicRoot } = input;
+  const header = `主题: ${topicRoot ?? "untitled"}`;
+  if (layoutRoots.length === 0) {
+    return header + "\n\n(空)";
+  }
+  const blocks: string[] = [];
+  for (const root of layoutRoots) {
+    blocks.push(renderNode(root, 0, /*isGhostContext=*/ true));
+  }
+  // blocks 之间用空行分隔,便于肉眼扫
+  return [header, "", blocks.join("\n\n")].join("\n") + "\n";
+}
+
+/** 渲染一个节点。isGhostContext 决定第一行用 📁 还是 - 前缀。 */
+function renderNode(node: LayoutNode, depth: number, isGhostContext: boolean): string {
+  const lines: string[] = [];
+  const indent = "  ".repeat(depth);
+  const isGhost = isGhostContext && depth === 0 && node.id.includes("/");
+  const label = isGhost ? `📁 ${node.id.split("/").pop() || node.id}` : node.id;
+  const prefix = isGhost ? "" : "- ";
+  let line = `${indent}${prefix}${label}`;
+  if (node.collapsed && node.children.length > 0) {
+    const total = countDescendants(node);
+    line += ` (${total})`;
+  }
+  lines.push(line);
+  if (!node.collapsed) {
+    for (const child of node.children) {
+      lines.push(renderNode(child, depth + 1, false));
+    }
+  }
+  return lines.join("\n");
+}
+
+/** 递归统计折叠子树的总节点数(含 children 自身) */
+function countDescendants(node: LayoutNode): number {
+  let n = node.children.length;
+  for (const c of node.children) n += countDescendants(c);
+  return n;
+}
+
+/**
+ * 把 layoutRoots 序列化为 Mermaid 引用块(graph TD),可粘到任何 .md 直接渲染。
+ *
+ * 形状:
+ *   ```mermaid
+ *   %% topic: <topicRoot>
+ *   graph TD
+ *     n0["📁 前端.md"]
+ *     n0 --> n1["工程化"]
+ *     n1 --> n2["性能优化"]
+ *     n2 --> n3["RUM"]
+ *   ```
+ *
+ * 设计要点:
+ * - mermaid id 用 `n` + 自增序号(`n0`/`n1`/...)保证唯一,即使同名节点也不冲突
+ * - label 用 `["..."]` 包裹,内容需转义 `"` 和 `\`
+ * - ghost 节点用 `📁` 前缀(label 一致,与文字版/canvas 渲染对齐)
+ * - 顶部 `%% topic: ...` 注释 —— mermaid 注释不渲染,源码可读
+ * - 折叠节点的子节点不输出(避免冗余)
+ *
+ * 适用场景:粘到 .md 直接看到树形图;无需 Excel/dataview,所有支持 mermaid 的
+ * 渲染器(Obsidian / GitHub / GitLab / VSCode preview)都直接生效。
+ */
+export function serializeTreeToMermaid(input: SerializeInput): string {
+  const { layoutRoots, topicRoot } = input;
+  const out: string[] = ["```mermaid"];
+  out.push(`%% topic: ${topicRoot ?? "untitled"}`);
+  out.push("graph TD");
+  let counter = 0;
+  const idMap = new WeakMap<LayoutNode, string>();
+
+  const allocate = (node: LayoutNode): string => {
+    const id = `n${counter++}`;
+    idMap.set(node, id);
+    return id;
+  };
+
+  for (const root of layoutRoots) {
+    walkMermaid(root, true, out, idMap, allocate);
+  }
+  out.push("```");
+  return out.join("\n") + "\n";
+}
+
+/** 递归:输出每个节点的定义行 + 与父的边。 */
+function walkMermaid(
+  node: LayoutNode,
+  isGhost: boolean,
+  out: string[],
+  idMap: WeakMap<LayoutNode, string>,
+  allocate: (n: LayoutNode) => string,
+): void {
+  const myId = idMap.get(node) ?? allocate(node);
+  const label = isGhost && node.id.includes("/")
+    ? `📁 ${node.id.split("/").pop() || node.id}`
+    : node.id;
+  out.push(`  ${myId}["${escapeMermaidLabel(label)}"]`);
+
+  if (node.collapsed) return;
+
+  for (const child of node.children) {
+    const childId = allocate(child);
+    out.push(`  ${myId} --> ${childId}`);
+    // 子递归用 isGhost=false(子节点永远不是 layoutRoot 包装层)
+    walkMermaid(child, false, out, idMap, allocate);
+  }
+}
+
+/** Mermaid label 内必须转义:双引号、反斜杠。括号通常安全但有特殊字符时建议。 */
+function escapeMermaidLabel(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 export interface CanvasCallbacks {
   onJump(event: CreationEvent): void;
   onCollapseChange?(collapsed: Set<string>): void;
@@ -34,6 +177,9 @@ export class LinkTreeCanvas {
   private clickedId: string | null = null;
   private activeId: string | null = null;
   private firstUpdate = true;
+  // 最近一次 update 后的 layout 快照 —— 给导出按钮复用
+  private currentLayoutRoots: LayoutNode[] = [];
+  private currentTopicRoot: string | null = null;
 
   // 平滑动画
   private animRaf: number | null = null;
@@ -76,6 +222,7 @@ export class LinkTreeCanvas {
     events: CreationEvent[],
     deps: ProjectDeps,
     activeNoteTarget?: string | null,
+    topicRoot?: string | null,
   ): void {
     console.debug("[scan] LinkTreeCanvas.update enter, events=", events.length);
     this.evMap.clear();
@@ -178,7 +325,29 @@ export class LinkTreeCanvas {
       this._animatePanTo(this.activeId);
     }
 
+    // 缓存最新 layout 快照,给导出按钮复用
+    this.currentLayoutRoots = layoutRoots;
+    this.currentTopicRoot = topicRoot ?? null;
+
     this._rf();
+  }
+
+  /**
+   * 序列化为文本。无数据时返回 ""(调用方走"请先生成"分支)。
+   * @param format "text" = 缩进树状文本;"mermaid" = graph TD 语法(粘到 .md 直接渲染)。
+   *  纯函数,无副作用;实现见 serializeTreeToText / serializeTreeToMermaid。
+   */
+  getSerializedTree(format: "text" | "mermaid" = "text"): string {
+    const fn = format === "mermaid" ? serializeTreeToMermaid : serializeTreeToText;
+    return fn({
+      layoutRoots: this.currentLayoutRoots,
+      topicRoot: this.currentTopicRoot,
+    });
+  }
+
+  /** 当前缓存的 layoutRoot 数量(0 = 没数据) */
+  currentLayoutRootCount(): number {
+    return this.currentLayoutRoots.length;
   }
 
   private _tl(n: TreeNode): LayoutNode {
