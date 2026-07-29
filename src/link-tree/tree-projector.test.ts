@@ -58,25 +58,43 @@ describe("projectTree", () => {
     expect(roots[1].event.target).toBe("D");
   });
 
-  it("按 firstSeenAt 顺序：先处理的事件为根，后处理的挂上去", () => {
-    // e2 (C ← B.md) 有 firstSeenAt 50，先于 e1 (B ← A.md, 100) 被处理
-    // → e2 找不到父（B 尚未被处理）→ 根；e1 找不到父 → 根
-    const events = [
+  it("挂载与 firstSeenAt 顺序解耦:子 ctime 早于父 ctime 也应正确挂载", () => {
+    // 重构后挂载不再依赖 firstSeenAt,只看 byTarget(parentKey) 是否有父。
+    // 两种顺序都应得到「B 为根,C 挂 B 下」的结果。
+    const childFirst = [
       ev("e2", "C", "B.md", 50),
       ev("e1", "B", "A.md", 100),
     ];
-    const roots = projectTree(events, deps());
-    expect(roots).toHaveLength(2);
-    // 但若改为真实捕获顺序（先父后子），子应挂上：
-    const events2 = [
-      ev("e1", "B", "A.md", 50),   // 先捕获 B
-      ev("e2", "C", "B.md", 100),  // 后捕获 C → 父 B 已存在 → 挂上
+    const r1 = projectTree(childFirst, deps());
+    expect(r1).toHaveLength(1);
+    expect(r1[0].event.target).toBe("B");
+    expect(r1[0].children).toHaveLength(1);
+    expect(r1[0].children[0].event.target).toBe("C");
+
+    const parentFirst = [
+      ev("e1", "B", "A.md", 50),
+      ev("e2", "C", "B.md", 100),
     ];
-    const roots2 = projectTree(events2, deps());
-    expect(roots2).toHaveLength(1);
-    expect(roots2[0].event.target).toBe("B");
-    expect(roots2[0].children).toHaveLength(1);
-    expect(roots2[0].children[0].event.target).toBe("C");
+    const r2 = projectTree(parentFirst, deps());
+    expect(r2).toHaveLength(1);
+    expect(r2[0].event.target).toBe("B");
+    expect(r2[0].children[0].event.target).toBe("C");
+  });
+
+  it("回归:子 ctime 早于父 ctime 的多级链不拆根(2026-07 双 ghost bug)", () => {
+    // 复刻真实场景:CLS 笔记先建(50),其父 性能优化 后建(100)。
+    // 旧算法:CLS 先处理时父未入 nodeMap → 误判 root → 多出 ghost
+    // 新算法:挂载与顺序解耦,CLS 正确挂到 性能优化 下
+    const events = [
+      ev("e_cls", "用CLS判断", "性能优化.md", 50),
+      ev("e_perf", "性能优化", "工程化.md", 100),
+      ev("e_eng", "工程化", "前端.md", 200),
+    ];
+    const roots = projectTree(events, deps());
+    expect(roots).toHaveLength(1);
+    expect(roots[0].event.target).toBe("工程化");
+    expect(roots[0].children[0].event.target).toBe("性能优化");
+    expect(roots[0].children[0].children[0].event.target).toBe("用CLS判断");
   });
 
   it("status 派生：target 已解析 → created", () => {

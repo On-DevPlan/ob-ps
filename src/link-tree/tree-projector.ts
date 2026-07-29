@@ -46,6 +46,12 @@ export interface ProjectDeps {
  * 复杂度 O(E)，与 vault 链接总数 R 无关。
  * parent/children 靠事件自身匹配，status/isStale 靠 ProjectDeps 的 O(1) 查询。
  *
+ * 两遍扫描拓扑挂载(2026-07 修复 ctime-非-拓扑序 bug):
+ *   - 第一遍:为每个事件建 TreeNode,全部入 nodeMap(不挂载)
+ *   - 第二遍:对每个节点按 parentKey → byTarget 查父,挂到父下
+ *   - attached Set 防重复挂载;自指 parentEvent.id === e.id 排除
+ *   - 挂载决策与 firstSeenAt 顺序解耦,ctime 早于父的子节点也能正确归位
+ *
  * @returns 根节点数组（roots），每个 root 递归含 children
  */
 export function projectTree(
@@ -62,35 +68,42 @@ export function projectTree(
     }
   }
 
-  // 1. 分类 → 逐个创建 TreeNode（按 firstSeenAt 升序处理，
-  //    parent 仅在 nodeMap 中已存在时才挂载 → 自然打破循环）
-  const sorted = [...events].sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+  // 1. 第一遍:建全部 TreeNode,入 nodeMap。children 此时为空,depth=0 占位。
   const nodeMap = new Map<string, TreeNode>();
-  const roots: TreeNode[] = [];
-
-  for (const e of sorted) {
-    const node: TreeNode = {
+  for (const e of events) {
+    nodeMap.set(e.id, {
       event: e,
       children: [],
       status: "pending",
       isStale: false,
       depth: 0,
-    };
-    nodeMap.set(e.id, node);
+    });
+  }
+
+  // 2. 第二遍:按拓扑挂载。对每个事件查 byTarget.get(parentKey):
+  //    - parentEvent 存在且 ≠ 自身 → 挂到 parentEvent 对应的 node 下
+  //    - 否则 → root
+  //    attached Set 防止同一节点被重复挂到多个父(同 target 多事件场景下)。
+  //    二环 / 长环天然安全:已 attached 的节点跳过,剩余事件按各自 parentKey 走
+  //    —— 不会形成回到已处理节点的循环(见 plan/2026-07 修复说明)。
+  const roots: TreeNode[] = [];
+  const attached = new Set<string>();
+  for (const e of events) {
+    if (attached.has(e.id)) continue;
 
     const parentKey = normalizeSourcePath(e.sourcePath);
     const parentEvent = byTarget.get(parentKey);
 
     if (parentEvent && parentEvent.id !== e.id) {
-      // 只在父节点已进入 nodeMap（已在更早 firstSeenAt 被处理过）时才挂载
       const parentNode = nodeMap.get(parentEvent.id);
       if (parentNode) {
-        parentNode.children.push(node);
+        parentNode.children.push(nodeMap.get(e.id)!);
+        attached.add(e.id);
         continue;
       }
     }
-    // 根节点（触发源不在事件日志里，或触发自身，或循环引用打破后）
-    roots.push(node);
+    // 根节点（父不在事件日志里 / 父就是自身 / parent 节点缺失）
+    roots.push(nodeMap.get(e.id)!);
   }
 
   // 3. 修饰每个 node——status/isStale（O(1) 查询）、depth（递归）
