@@ -54,6 +54,13 @@ export interface LayoutNode {
   id: string;
   children: LayoutNode[];
   collapsed: boolean;
+  /**
+   * 2026-08 id 化修复:本节点是否代表一个 ghost(某 sourcePath 的 wrapper)。
+   * 仅作 styling hint(`📁` 前缀);不参与 Map key 区分 —— Map key 由
+   * ghost layoutRoot 的 `"ghost:" + sourcePath` 前缀保证唯一。
+   * 默认 undefined → 序列化时回退到 `id.includes("/")` 启发式(测试用)。
+   */
+  isGhost?: boolean;
 }
 
 // ---- 布局函数 ----

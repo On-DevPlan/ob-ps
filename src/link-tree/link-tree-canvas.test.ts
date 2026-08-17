@@ -34,7 +34,7 @@ describe("serializeTreeToText", () => {
     expect(out).toBe("主题: 前端\n\n- 工程化\n");
   });
 
-  it("ghost 节点用 📁 前缀 + id 末段", () => {
+  it("ghost 节点用 📁 前缀 + id 末段(2026-08 修复后 .md 不显示)", () => {
     const input: SerializeInput = {
       topicRoot: "前端",
       layoutRoots: [
@@ -45,7 +45,9 @@ describe("serializeTreeToText", () => {
       ],
     };
     const out = serializeTreeToText(input);
-    expect(out).toContain("📁 前端.md");
+    // id 末段剥 .md 后缀后展示,避免 UI 出现 "前端.md"
+    expect(out).toContain("📁 前端");
+    expect(out).not.toContain("📁 前端.md");
     expect(out).toContain("  - 工程化");
     expect(out).toContain("    - 性能优化");
     expect(out).toContain("    - options填写的是hook时机吗");
@@ -63,8 +65,9 @@ describe("serializeTreeToText", () => {
     };
     const out = serializeTreeToText(input);
     const lines = out.split("\n");
-    // ghost "📁 前端.md" 的孩子 "工程化" 在它内部出现,
+    // ghost "📁 前端"(剥 .md 后)的孩子 "工程化" 在它内部出现,
     // bare "工程化"(root2)单独成行。验证 bare root 之前有空行
+    expect(out).toContain("📁 前端");
     const bareRootIdx = lines.findIndex((l) => l === "- 工程化");
     expect(bareRootIdx).toBeGreaterThan(0);
     expect(lines[bareRootIdx - 1]).toBe("");
@@ -177,13 +180,15 @@ describe("serializeTreeToMermaid", () => {
     expect(closeFenceCount).toBe(1);
   });
 
-  it("ghost layoutRoot 用 📁 前缀 + 末段 label", () => {
+  it("ghost layoutRoot 用 📁 前缀 + 末段 label(2026-08 修复后 .md 不显示)", () => {
     const input: SerializeInput = {
       topicRoot: "前端",
       layoutRoots: [ln("前端/前端.md", [ln("工程化", [ln("性能优化")])])],
     };
     const out = serializeTreeToMermaid(input);
-    expect(out).toContain('  n0["📁 前端.md"]');
+    // 末段剥 .md 后缀,UI 不会出现 "前端.md"
+    expect(out).toContain('  n0["📁 前端"]');
+    expect(out).not.toContain('  n0["📁 前端.md"]');
     expect(out).toContain('  n1["工程化"]');
     expect(out).toContain('  n2["性能优化"]');
     // ghost 后正常 n0 → n1 → n2 连边
@@ -194,6 +199,8 @@ describe("serializeTreeToMermaid", () => {
   it("label 含双引号或反斜杠会转义", () => {
     const out = serializeTreeToMermaid({ layoutRoots: [ln(`He said "hi" \\path`)], topicRoot: "T" });
     // 反斜杠转义为 \\,双引号转义为 \"
+    // 注意:ln id 是 "He said \"hi\" \\path",不含 .md 所以 label 不被剥;
+    // 但 bare root 默认会被 isGhostNode 启发式判定为 false(isGhostNode 看到 id 不含 /,也没 isGhost flag → false),所以是 plain label
     expect(out).toContain(`n0["He said \\"hi\\" \\\\path"]`);
   });
 
@@ -208,6 +215,7 @@ describe("serializeTreeToMermaid", () => {
     };
     const out = serializeTreeToMermaid(input);
     // 从定义行 `  n0["root1"]` 中提取 id —— 用 `n数字` 后面紧跟 `[` 防止误抓边中的 n0
+    // 修复后 label 用 basenameOfId(末段剥 .md),但 root1/root2/A/B 均不含 .md,所以 label 同 id
     const defIds = [...out.matchAll(/n(\d+)\["/g)].map((m) => m[1]);
     const unique = new Set(defIds);
     expect(unique.size).toBe(4); // root1, A, root2, B
@@ -224,7 +232,7 @@ describe("serializeTreeToMermaid", () => {
     const ids = [...out.matchAll(/n\d+/g)].map((m) => m[0]);
     const unique = new Set(ids);
     expect(unique.size).toBe(2);
-    // 两条 X label 都出现
+    // 两条 X label 都出现(每条 layoutRoot 的 bare root 都生成一个定义行)
     const labels = [...out.matchAll(/\["X"\]/g)];
     expect(labels.length).toBe(2);
   });

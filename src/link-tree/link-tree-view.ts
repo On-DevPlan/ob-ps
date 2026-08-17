@@ -12,22 +12,18 @@
 
 import { LinkTreeCanvas } from "./link-tree-canvas";
 import type { CreationEvent } from "./creation-event";
-import { normalizeTarget } from "./creation-event";
 import { makeProjectDeps, type ProjectDeps } from "./tree-projector";
 import { loadEvents, appendEvents, type HasLinkTree } from "./link-tree-repository";
 import type { App } from "obsidian";
 import type { BklinkGraph } from "./topic-resolver";
 import { findTopicRoot } from "./topic-resolver";
 
-/** 从 vault 相对路径提取 basename,去除 .md 后缀 */
-function basenameFromPath(path: string): string {
-  const last = path.split("/").pop() ?? path;
-  return last.replace(/\.md$/i, "");
-}
-
 /**
- * 按当前笔记路径过滤事件到同一主题根（bklink 向上追溯到的根）。
+ * 按当前笔记路径过滤事件到同一主题根(bklink 向上追溯到的根)。
  * 活跃笔记不存在则退化为全部。
+ *
+ * 2026-08 id 化修复:用 activeNotePath(完整路径)而不是 basename 找 topicRoot,
+ * 与 path-keyed graph 保持一致。两个同名文件各自走独立 bklink 链,filter 不会 bleed。
  */
 export function filterByActiveNote(
   events: CreationEvent[],
@@ -35,8 +31,8 @@ export function filterByActiveNote(
   graph: BklinkGraph,
 ): CreationEvent[] {
   if (!activeNotePath) return events;
-  const activeBasename = basenameFromPath(activeNotePath);
-  const activeRoot = findTopicRoot(activeBasename, graph);
+  // 用完整路径而非 basename —— 2026-08 graph 用 path 作 key
+  const activeRoot = findTopicRoot(activeNotePath, graph);
   return events.filter((e) => e.topicRoot === activeRoot);
 }
 
@@ -115,13 +111,13 @@ export class TreeLinkView {
     const filtered = events;  // 不再内部过滤,caller 已过滤
     console.debug("[scan] TreeLinkView.update using", filtered.length, "events directly");
 
-    const noteBasename = activeNotePath
-      ? (activeNotePath.split("/").pop() ?? "").replace(/\.md$/i, "")
-      : "";
-    const activeNoteTarget = noteBasename
-      ? filtered.find((e) => normalizeTarget(e.target) === noteBasename)?.target ?? null
+    // 2026-08 id 化修复:activeNoteTarget 用 targetPath(完整路径)匹配。
+    // 旧逻辑用 basename 匹配 active note,重名文件时高亮错节点。
+    // 新逻辑直接用完整 activeNotePath 比对,杜绝歧义。
+    const activeNoteTarget = activeNotePath
+      ? filtered.find((e) => e.targetPath === activeNotePath)?.targetPath ?? null
       : null;
-    console.debug("[scan] TreeLinkView.update noteBasename=", noteBasename, "activeNoteTarget=", activeNoteTarget);
+    console.debug("[scan] TreeLinkView.update activeNotePath=", activeNotePath, "activeNoteTarget=", activeNoteTarget);
 
     this.canvas.setCollapsed(this.collapsed);
     this.canvas.update(filtered, deps, activeNoteTarget, this.currentTopicRoot);
@@ -153,8 +149,10 @@ export class TreeLinkView {
 
   /** 重置折叠状态并重算（currentEvents 已经过滤过,直接用） */
   collapseAll(): void {
+    // 2026-08 id 化修复:折叠 key 用 targetPath(完整路径),避免重名文件
+    // 互相干扰折叠状态。
     this.collapsed = new Set(
-      this.currentEvents.map((e) => e.target),
+      this.currentEvents.map((e) => e.targetPath),
     );
     if (this.currentEvents.length && this.currentDeps) {
       this.canvas.setCollapsed(this.collapsed);

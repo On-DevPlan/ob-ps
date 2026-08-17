@@ -113,6 +113,19 @@ export default class LocalRunnerPlugin extends Plugin {
     this.linkTreeEvents = loadEvents(data ?? null);
     this.linkTreeCollapsed = data?.linkTreeCollapsed ?? {};
 
+    // 2a. linkTree schema v1 → v2 迁移(2026-08 id 化):
+    //     v1 事件的 target 是 basename,在 evMap / LayoutNode.id / byTargetPath
+    //     都用作 key 时会撞 —— 重名文件会导致跳错文件。v2 引入 targetPath 字段,
+    //     旧数据本身已损坏,无法修复,所以清空 linkTree 数据 + 折叠状态。
+    //     用户重新 scan 即可重建(数据本身从 vault bklink 派生,丢失无副作用)。
+    if (data?.linkTree && data.linkTree.version !== 2) {
+      console.debug("[onload] linkTree schema v1 detected, clearing (v2 targetPath required)");
+      this.linkTreeEvents = [];
+      this.linkTreeCollapsed = {};
+      data.linkTree = { events: [], version: 2 };
+      await this.saveData(data);
+    }
+
     // 3. 迁移 commandGroups:旧「一组多预设」→ 新「一组一命令」
     const rawGroups = this.settings.commandGroups;
     const migratedGroups = migrateCommandGroups(rawGroups);
@@ -441,14 +454,18 @@ export default class LocalRunnerPlugin extends Plugin {
   private findTopicRootFor(activePath: string | null): string | null {
     if (!activePath) return null;
     const basename = activePath.split("/").pop()?.replace(/\.md$/i, "") ?? "";
-    // 从已加载的事件找 topicRoot(避免重复构建 graph)
+    // 2026-08 id 化修复:优先用 targetPath(完整路径)匹配,杜绝重名文件歧义。
+    // 旧数据无 targetPath 时 fallback 到 target basename(向后兼容,但重名仍会撞)。
     const hit = this.linkTreeEvents.find(
-      (e) => e.topicRoot && e.target === basename,
+      (e) => e.topicRoot && (
+        e.targetPath === activePath ||     // 新数据(v2 schema)
+        (!e.targetPath && e.target === basename)  // 旧数据 fallback
+      ),
     );
     if (hit?.topicRoot) return hit.topicRoot;
-    // fallback: 用 graph 算
+    // fallback: 用 graph 算 —— 2026-08 修复后用完整路径作为起点
     const graph = buildBklinkGraph(this.app);
-    return findTopicRoot(basename, graph);
+    return findTopicRoot(activePath, graph);
   }
 
   /** 尝试从 vault 级备份恢复 */

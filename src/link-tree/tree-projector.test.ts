@@ -6,9 +6,18 @@ import { describe, it, expect } from "vitest";
 import { projectTree, type ProjectDeps } from "./tree-projector";
 import type { CreationEvent } from "./creation-event";
 
-/** 辅助：快速造事件 */
-function ev(id: string, target: string, sourcePath: string, firstSeenAt = 0): CreationEvent {
-  return { id, target, sourcePath, position: { line: 1, col: 0 }, firstSeenAt, runId: "R1" };
+/** 辅助：快速造事件。targetPath 默认 = `${target}.md`(与历史测试语义一致);
+ * 显式传入覆盖默认值,用于 basename 碰撞场景 */
+function ev(id: string, target: string, sourcePath: string, firstSeenAt = 0, targetPath?: string): CreationEvent {
+  return {
+    id,
+    target,
+    targetPath: targetPath ?? `${target}.md`,
+    sourcePath,
+    position: { line: 1, col: 0 },
+    firstSeenAt,
+    runId: "R1",
+  };
 }
 
 /** 假 ProjectDeps：默认全 resolved、全 exists */
@@ -137,6 +146,23 @@ describe("projectTree", () => {
     const roots = projectTree(events, deps());
     expect(roots).toHaveLength(1);  // 不会自我挂载
     expect(roots[0].children).toHaveLength(0);
+  });
+
+  it("回归:byTargetPath 按完整路径区分同名事件(2026-08 id 化防御)", () => {
+    // 模拟:root 节点 + 两个同名子节点 test/工程化.md 和 前端/工程化.md。
+    // 修复前 byTarget 按 target basename 去重,只保留一条子事件,另一个丢失。
+    // 修复后 byTargetPath 按 targetPath(完整路径)区分,两条都挂到 root 下。
+    const events = [
+      ev("e_root", "root", "root.md", 50, "root.md"),
+      ev("e_test", "工程化", "root.md", 100, "test/工程化.md"),
+      ev("e_frontend", "工程化", "root.md", 200, "前端/工程化.md"),
+    ];
+    const roots = projectTree(events, deps());
+    expect(roots).toHaveLength(1);                 // root 是唯一根
+    expect(roots[0].event.id).toBe("e_root");
+    expect(roots[0].children).toHaveLength(2);     // 两个工程化 子节点 都挂上来
+    const childPaths = roots[0].children.map((c) => c.event.targetPath).sort();
+    expect(childPaths).toEqual(["test/工程化.md", "前端/工程化.md"]);
   });
 
   it("空输入 → 空输出", () => {

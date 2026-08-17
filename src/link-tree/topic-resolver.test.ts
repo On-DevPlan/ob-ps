@@ -213,7 +213,7 @@ describe("getAllTopicRoots", () => {
 // ============ buildBklinkGraph 集成 ============
 
 describe("buildBklinkGraph", () => {
-  it("从 fake app 构建图", () => {
+  it("从 fake app 构建图(单文件同名无碰撞场景)", () => {
     const files = [
       { basename: "root", path: "root.md", stat: { ctime: 1 } },
       { basename: "A", path: "A.md", stat: { ctime: 2 } },
@@ -239,12 +239,132 @@ describe("buildBklinkGraph", () => {
 
     const g = buildBklinkGraph(fakeApp as unknown as Parameters<typeof buildBklinkGraph>[0]);
 
-    expect(g.forward.get("root")).toEqual([]);
-    expect(g.forward.get("A")).toEqual(["root"]);
-    expect(g.forward.get("B")).toEqual(["A"]);
-    expect(g.backward.get("root")).toEqual(["A"]);
-    expect(g.backward.get("A")).toEqual(["B"]);
-    expect(g.backward.get("B")).toBeUndefined();
+    // 修复后 graph 用 path 作 key(2026-08 id 化)
+    expect(g.forward.get("root.md")).toEqual([]);
+    expect(g.forward.get("A.md")).toEqual(["root.md"]);
+    expect(g.forward.get("B.md")).toEqual(["A.md"]);
+    expect(g.backward.get("root.md")).toEqual(["A.md"]);
+    expect(g.backward.get("A.md")).toEqual(["B.md"]);
+    // 2026-08:backward 主动为空数组(便于 getTopicSubgraph 直接 [] ?? [] 迭代)而非 undefined
+    expect(g.backward.get("B.md")).toEqual([]);
+  });
+
+  it("回归:basename 碰撞 → 两个同名文件独立 bklink 链(2026-08 修复)", () => {
+    // 用户场景:test/工程化.md 和 前端/工程化.md 同名。
+    // 性能优化.md bklink 指向 [[工程化]] (语义上指向前端/工程化.md)。
+    // 修复前:graph 按 basename key,forward["工程化"] 被后写覆盖,
+    //   findTopicRoot("工程化") 会走 前端 的链,把性能优化也带进 test 的子图。
+    // 修复后:graph 用 path key;bklink basename 通过 getFirstLinkpathDest 解析为单一目标,
+    //   前端/工程化.md 的 bklink "前端" → 前端/前端.md,test/工程化.md 的 bklink "前端" → 同;
+    //   性能优化 的 bklink "工程化" → 模拟返回 前端/工程化.md(不是两个都拉)。
+    const files = [
+      { basename: "前端", path: "前端/前端.md", stat: { ctime: 1 } },
+      { basename: "工程化", path: "前端/工程化.md", stat: { ctime: 2 } },
+      { basename: "工程化", path: "test/工程化.md", stat: { ctime: 3 } },
+      { basename: "性能优化", path: "前端/性能优化.md", stat: { ctime: 4 } },
+    ];
+
+    const cache = new Map<string, { frontmatter?: { bklink?: unknown } }>();
+    cache.set("前端/前端.md", { frontmatter: {} });
+    cache.set("前端/工程化.md", { frontmatter: { bklink: '[[前端]]' } });
+    cache.set("test/工程化.md", { frontmatter: { bklink: '[[前端]]' } });  // 独立 bklink 链
+    cache.set("前端/性能优化.md", { frontmatter: { bklink: '[[工程化]]' } });
+
+    const fakeApp = {
+      vault: {
+        getMarkdownFiles: () => files,
+        getAbstractFileByPath: (path: string) =>
+          files.find((f) => f.path === path) ?? null,
+      },
+      metadataCache: {
+        getFileCache: (file: { path: string }) => cache.get(file.path) ?? null,
+        // 2026-08 id 化修复后,buildBklinkGraph 用此 API 解析 bklink basename → 单一文件路径
+        getFirstLinkpathDest: (link: string, _source: string) => {
+          const matches = files.filter((f) => f.basename === link);
+          // 模拟 Obsidian:多个匹配时按 path 字典序取第一个
+          // test/工程化.md < 前端/工程化.md,字典序 test 在前 → 但本测试期望"前端"语义
+          // 我们直接按文件数组顺序,与 Obsidian 默认行为一致
+          return matches[0] ?? null;
+        },
+      },
+    };
+
+    const g = buildBklinkGraph(fakeApp as unknown as Parameters<typeof buildBklinkGraph>[0]);
+
+    // 两个 工程化 文件的 bklink 各自独立保留 —— 不再被后写覆盖
+    expect(g.forward.get("前端/工程化.md")).toEqual(["前端/前端.md"]);
+    expect(g.forward.get("test/工程化.md")).toEqual(["前端/前端.md"]);
+    // 性能优化 bklink "工程化" → 解析到单一文件(matches[0] = 前端/工程化.md 字典序在前)
+    expect(g.forward.get("前端/性能优化.md")).toEqual(["前端/工程化.md"]);
+    // 只有被解析到的 工程化 有 backward entry;另一个文件独立(没有 bleed)
+    expect(g.backward.get("前端/工程化.md")).toEqual(["前端/性能优化.md"]);
+    expect(g.backward.get("test/工程化.md")).toEqual([]);
+  });
+
+  it("回归:findTopicRoot 用 path 走正确 bklink 链(2026-08 修复)", () => {
+    // 两个独立链:test/工程化 → test_topic,前端/工程化 → 前端_topic。
+    // 性能优化 只依赖 前端/工程化,不应出现在 test_topic 子图里。
+    // 关键:模拟 getFirstLinkpathDest 按 source folder 优先,避免 bleed
+    // (test/性能优化 不存在,只有 前端/性能优化)
+    const files = [
+      { basename: "前端_topic", path: "test/test_topic.md", stat: { ctime: 1 } },
+      { basename: "前端_topic", path: "前端/前端_topic.md", stat: { ctime: 2 } },
+      { basename: "工程化", path: "test/工程化.md", stat: { ctime: 3 } },
+      { basename: "工程化", path: "前端/工程化.md", stat: { ctime: 4 } },
+      { basename: "性能优化", path: "前端/性能优化.md", stat: { ctime: 5 } },
+    ];
+
+    const cache = new Map<string, { frontmatter?: { bklink?: unknown } }>();
+    cache.set("test/test_topic.md", { frontmatter: {} });
+    cache.set("前端/前端_topic.md", { frontmatter: {} });
+    cache.set("test/工程化.md", { frontmatter: { bklink: '[[前端_topic]]' } });
+    cache.set("前端/工程化.md", { frontmatter: { bklink: '[[前端_topic]]' } });
+    cache.set("前端/性能优化.md", { frontmatter: { bklink: '[[工程化]]' } });
+
+    const fakeApp = {
+      vault: {
+        getMarkdownFiles: () => files,
+        getAbstractFileByPath: (path: string) =>
+          files.find((f) => f.path === path) ?? null,
+      },
+      metadataCache: {
+        getFileCache: (file: { path: string }) => cache.get(file.path) ?? null,
+        // 关键修复:模拟 Obsidian 解析 bklink 时按 source folder 优先(避免 bleed)
+        getFirstLinkpathDest: (link: string, source: string) => {
+          const matches = files.filter((f) => f.basename === link);
+          if (matches.length === 0) return null;
+          // 优先同 folder 的同名文件(更符合用户对 "bklink 语义" 的预期)
+          const sourceFolder = source.includes("/") ? source.slice(0, source.lastIndexOf("/")) : "";
+          const sameFolder = matches.find((m) => {
+            const mFolder = m.path.includes("/") ? m.path.slice(0, m.path.lastIndexOf("/")) : "";
+            return mFolder === sourceFolder;
+          });
+          return sameFolder ?? matches[0];
+        },
+      },
+    };
+
+    const g = buildBklinkGraph(fakeApp as unknown as Parameters<typeof buildBklinkGraph>[0]);
+
+    // test/工程化 → 同 folder 的 test_topic(不是 前端/前端_topic)
+    expect(g.forward.get("test/工程化.md")).toEqual(["test/test_topic.md"]);
+    // 前端/工程化 → 同 folder 的 前端/前端_topic
+    expect(g.forward.get("前端/工程化.md")).toEqual(["前端/前端_topic.md"]);
+    // 性能优化 → 同 folder 的 前端/工程化.md
+    expect(g.forward.get("前端/性能优化.md")).toEqual(["前端/工程化.md"]);
+
+    // test/工程化 应走到 test/test_topic
+    expect(findTopicRoot("test/工程化.md", g)).toBe("test/test_topic.md");
+    // test_topic 子图只包含 test/工程化(性能优化 在 前端_topic 子图里,不 bleed)
+    const testSub = getTopicSubgraph("test/test_topic.md", g);
+    expect(testSub).toEqual(new Set(["test/test_topic.md", "test/工程化.md"]));
+    // 前端_topic 子图包含 前端/工程化 和 性能优化
+    const frontSub = getTopicSubgraph("前端/前端_topic.md", g);
+    expect(frontSub).toEqual(new Set([
+      "前端/前端_topic.md",
+      "前端/工程化.md",
+      "前端/性能优化.md",
+    ]));
   });
 
   it("支持数组形式 bklink", () => {
@@ -271,9 +391,10 @@ describe("buildBklinkGraph", () => {
 
     const g = buildBklinkGraph(fakeApp as unknown as Parameters<typeof buildBklinkGraph>[0]);
 
-    expect(g.forward.get("B")).toEqual(["X", "A"]);
-    expect(g.backward.get("X")?.sort()).toEqual(["A", "B"]);
-    expect(g.backward.get("A")).toEqual(["B"]);
+    // 修复后 graph 用 path 作 key(2026-08 id 化)
+    expect(g.forward.get("B.md")?.sort()).toEqual(["A.md", "X.md"]);
+    expect(g.backward.get("X.md")?.sort()).toEqual(["A.md", "B.md"]);
+    expect(g.backward.get("A.md")).toEqual(["B.md"]);
   });
 
   it("无 metadataCache 的 app 返回空图", () => {
@@ -290,7 +411,8 @@ describe("buildBklinkGraph", () => {
 
     const g = buildBklinkGraph(fakeApp as unknown as Parameters<typeof buildBklinkGraph>[0]);
 
-    expect(g.forward.get("A")).toEqual([]);
+    // 单文件同名无碰撞,基础行为(修复后用 path 作 key)
+    expect(g.forward.get("A.md")).toEqual([]);
   });
 });
 

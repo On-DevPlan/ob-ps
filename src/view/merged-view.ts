@@ -112,9 +112,13 @@ export class MergedRunnerInspectorView extends ItemView {
     this.opts = opts;
     this.treeView = new TreeLinkView(
       (event) => {
-        // 跳转到目标笔记（event.target），不是 bklink 前置（event.sourcePath）
+        // 跳转到目标笔记（event.targetPath = child 完整路径），不是 bklink 前置（event.sourcePath）。
+        // 2026-08 id 化修复:直接用 event.targetPath 打开文件,不再走 findBasenamePath。
+        // 旧逻辑用 event.target basename 找 vault 文件,重名时打开错文件(用户报告的 bug)。
+        // 新逻辑直接拿 child 完整路径,openSource 一次到位。
+        // 旧数据(无 targetPath)走 fallback 到 event.sourcePath(祖先父级路径),至少不报错。
         void this.openSource({
-          sourcePath: this.findBasenamePath(event.target) ?? event.sourcePath,
+          sourcePath: event.targetPath ?? event.sourcePath,
           position: event.position,
           target: event.target,
           state: "resolved",
@@ -707,12 +711,6 @@ export class MergedRunnerInspectorView extends ItemView {
   /** 当前打开笔记的路径（用于 link-tree 作用域过滤） */
   private getActiveNotePath(): string | null {
     return this.getTargetMarkdownView()?.file?.path ?? null;
-  }
-
-  /** 按 basename 找 vault 中的文件路径（例如点击树节点时跳转用） */
-  private findBasenamePath(basename: string): string | null {
-    const files = this.app.vault.getMarkdownFiles();
-    return files.find((f) => f.basename === basename)?.path ?? null;
   }
 
   /** 清除未解析双链:[[x]] → [x] 语法清除(基于正则 + unresolved 过滤) */

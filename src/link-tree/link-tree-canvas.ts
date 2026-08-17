@@ -57,8 +57,12 @@ export function serializeTreeToText(input: SerializeInput): string {
 function renderNode(node: LayoutNode, depth: number, isGhostContext: boolean): string {
   const lines: string[] = [];
   const indent = "  ".repeat(depth);
-  const isGhost = isGhostContext && depth === 0 && node.id.includes("/");
-  const label = isGhost ? `📁 ${node.id.split("/").pop() || node.id}` : node.id;
+  // 2026-08 id 化修复:ghost layoutRoot 的 id 形如 "ghost:前端/前端.md",
+  // 其余裸 root / children 的 id 形如 "前端/工程化.md"(完整路径)。
+  // 用 isGhostNode 统一判定,而非 `node.id.includes("/")` —— 因为裸 root 也可能含 `/`。
+  const isGhost = isGhostContext && depth === 0 && isGhostNode(node);
+  const rawId = node.id.startsWith("ghost:") ? node.id.slice("ghost:".length) : node.id;
+  const label = isGhost ? `📁 ${basenameOfId(rawId)}` : basenameOfId(rawId);
   const prefix = isGhost ? "" : "- ";
   let line = `${indent}${prefix}${label}`;
   if (node.collapsed && node.children.length > 0) {
@@ -79,6 +83,28 @@ function countDescendants(node: LayoutNode): number {
   let n = node.children.length;
   for (const c of node.children) n += countDescendants(c);
   return n;
+}
+
+/**
+ * 从 node id(完整路径,如 "前端/工程化.md")提取 display basename(如 "工程化")。
+ * 2026-08 id 化修复后所有 LayoutNode.id 都用完整路径,
+ * 此函数统一剥 `.md` 后缀作为 UI 显示。
+ */
+function basenameOfId(id: string): string {
+  const last = id.split("/").pop() || id;
+  return last.replace(/\.md$/i, "");
+}
+
+/**
+ * 判定 LayoutNode 是否是 ghost(代表某个 sourcePath 的 wrapper)。
+ * 优先级:显式 `isGhost` flag > id 前缀 > `/` 启发式(测试兼容)。
+ * 2026-08 id 化修复后,生产代码永远设 isGhost=true / 用 `ghost:` 前缀;
+ * `/` 启发式仅作旧测试 helper 的回退。
+ */
+function isGhostNode(node: LayoutNode): boolean {
+  if (node.isGhost === true) return true;
+  if (node.id.startsWith("ghost:")) return true;
+  return node.id.includes("/");
 }
 
 /**
@@ -128,15 +154,16 @@ export function serializeTreeToMermaid(input: SerializeInput): string {
 /** 递归:输出每个节点的定义行 + 与父的边。 */
 function walkMermaid(
   node: LayoutNode,
-  isGhost: boolean,
+  isGhostContext: boolean,
   out: string[],
   idMap: WeakMap<LayoutNode, string>,
   allocate: (n: LayoutNode) => string,
 ): void {
   const myId = idMap.get(node) ?? allocate(node);
-  const label = isGhost && node.id.includes("/")
-    ? `📁 ${node.id.split("/").pop() || node.id}`
-    : node.id;
+  // 2026-08 id 化修复:用 isGhostNode() 精确判定,避免 bare root 也被加 📁 前缀。
+  const isGhost = isGhostContext && isGhostNode(node);
+  const rawId = node.id.startsWith("ghost:") ? node.id.slice("ghost:".length) : node.id;
+  const label = isGhost ? `📁 ${basenameOfId(rawId)}` : basenameOfId(rawId);
   out.push(`  ${myId}["${escapeMermaidLabel(label)}"]`);
 
   if (node.collapsed) return;
@@ -144,7 +171,7 @@ function walkMermaid(
   for (const child of node.children) {
     const childId = allocate(child);
     out.push(`  ${myId} --> ${childId}`);
-    // 子递归用 isGhost=false(子节点永远不是 layoutRoot 包装层)
+    // 子递归用 isGhostContext=false(子节点永远不是 layoutRoot 包装层)
     walkMermaid(child, false, out, idMap, allocate);
   }
 }
@@ -226,7 +253,9 @@ export class LinkTreeCanvas {
   ): void {
     console.debug("[scan] LinkTreeCanvas.update enter, events=", events.length);
     this.evMap.clear();
-    for (const e of events) this.evMap.set(e.target, e);
+    // 2026-08 id 化修复:evMap 按 targetPath(完整路径)做 key,不再按 target basename。
+    // 解决 vault 中两个同名文件 evMap 后写覆盖前写、点击跳错文件的 bug。
+    for (const e of events) this.evMap.set(e.targetPath, e);
 
     const treeRoots = projectTree(events, deps);
     console.debug("[scan] projectTree returned", treeRoots.length, "roots");
@@ -241,14 +270,23 @@ export class LinkTreeCanvas {
       arr.push(r);
       ghostMap.set(sp, arr);
     }
+    // 2026-08 id 化修复:ghostChildSet 用 targetPath(完整路径)做 key,
+    // 避免两个同名 child event 互相覆盖。
     const ghostChildSet = new Set<string>();
     const layoutRoots: LayoutNode[] = [];
     for (const [sp, subs] of ghostMap) {
-      for (const s of subs) ghostChildSet.add(s.event.target);
-      layoutRoots.push({ id: sp, children: subs.map(t => this._tl(t)), collapsed: this.collapsed.has(sp) });
+      for (const s of subs) ghostChildSet.add(s.event.targetPath);
+      // ghost layoutRoot id 加 "ghost:" 前缀,确保与 bare root(targetPath 完整路径)
+      // 永远不会撞 id —— 即使某文件既是 ghost 父又是 child 自身的 bare root。
+      layoutRoots.push({
+        id: "ghost:" + sp,
+        children: subs.map(t => this._tl(t)),
+        collapsed: this.collapsed.has(sp),
+        isGhost: true,
+      });
     }
     for (const r of bare) {
-      if (!ghostChildSet.has(r.event.target)) {
+      if (!ghostChildSet.has(r.event.targetPath)) {
         layoutRoots.push(this._tl(r));
       }
     }
@@ -261,7 +299,9 @@ export class LinkTreeCanvas {
     la.clear();
     const nd: DrawNode[] = [];
     const ed: DrawEdge[] = [];
-    const ghostIds = new Set(layoutRoots.filter(r => r.id.includes("/")).map(r => r.id));
+    // ghostIds:由 "ghost:" 前缀判定。不能用 id.includes("/") —— 修复后 bare root
+    // 的 id 也是完整路径(也含 "/"),会误判。
+    const ghostIds = new Set(layoutRoots.filter(r => r.id.startsWith("ghost:")).map(r => r.id));
 
     const walk = (n: LayoutNode): void => {
       const pos = layout.nodes.get(n.id);
@@ -269,12 +309,18 @@ export class LinkTreeCanvas {
       la.set(n.id, { x: pos.x, y: pos.y, w: pos.w, h: pos.h, hasC: pos.hasChildren, hid: ghostIds.has(n.id) ? this.canvas?.id ?? null : null });
 
       const isGhost = ghostIds.has(n.id);
-      const ev = this.evMap.get(n.id);
+      // 2026-08 id 化:LayoutNode.id = targetPath(完整路径)或 "ghost:" + sourcePath。
+      // evMap 按 targetPath key,ghost lookup 必然 miss(没 ghost 对应事件) → 走 fallback。
+      const evLookupId = isGhost ? n.id.slice("ghost:".length) : n.id;
+      const ev = this.evMap.get(evLookupId);
+      const rawId = isGhost ? n.id.slice("ghost:".length) : n.id;
+      // label 统一:basename(剥 .md 后缀,确保 UI 不出现 "工程化.md")
+      const displayLabel = basenameOfId(rawId);
 
       nd.push({
         id: n.id,
         x: pos.x, y: pos.y, w: pos.w, h: pos.h,
-        label: isGhost ? n.id.split("/").pop() || n.id : n.id,
+        label: displayLabel,
         isGhost, isStale: ev ? !deps.sourceExists(ev.sourcePath) : false,
         isCreated: ev ? deps.isResolved(ev.target, ev.sourcePath) : true,
         depth: pos.depth, hasChildren: pos.hasChildren,
@@ -351,7 +397,13 @@ export class LinkTreeCanvas {
   }
 
   private _tl(n: TreeNode): LayoutNode {
-    return { id: n.event.target, children: n.children.map(c => this._tl(c)), collapsed: this.collapsed.has(n.event.target) };
+    // 2026-08 id 化修复:id 用 targetPath(完整路径),保证全 vault 唯一。
+    // descendants 永远不是 ghost(isGhost:false)。
+    return {
+      id: n.event.targetPath,
+      children: n.children.map(c => this._tl(c)),
+      collapsed: this.collapsed.has(n.event.targetPath),
+    };
   }
 
   // 输入
