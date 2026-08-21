@@ -105,9 +105,8 @@ Releases are automated. Every push to `main` triggers GitHub Actions to:
 
 1. Bump the patch version in `manifest.json` and append a matching entry to `versions.json`.
 2. Type-check and build.
-3. Package `local-runner-<version>.zip` containing `main.js`, `manifest.json`, and `styles.css`.
-4. Attest build provenance for the artifacts.
-5. Commit the version bump with `[skip ci]`, tag it, and publish a GitHub Release.
+3. Attest build provenance for `main.js` and `styles.css`.
+4. Commit the version bump with `[skip ci]`, tag it, and publish a GitHub Release with `main.js`, `manifest.json`, and `styles.css` as release assets.
 
 For day-to-day work, `git push origin main` is all you need. Submitting to the Obsidian community store is a separate step: open a PR against [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) and add an entry to `community-plugins.json`.
 

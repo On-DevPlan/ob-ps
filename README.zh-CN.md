@@ -105,9 +105,8 @@ LOCAL_RUNNER_VAULT=/path/to/vault/.obsidian/plugins/local-runner npm run dev
 
 1. 递增 `manifest.json` 的 patch 版本，并在 `versions.json` 追加对应映射条目。
 2. 类型检查并构建。
-3. 打包 `local-runner-<version>.zip`，内含 `main.js`、`manifest.json`、`styles.css`。
-4. 为构建产物签署来源证明（build provenance）。
-5. 以 `[skip ci]` 提交版本号、打 tag、发布 GitHub Release。
+3. 为 `main.js` 与 `styles.css` 签署来源证明（build provenance）。
+4. 以 `[skip ci]` 提交版本号、打 tag、发布 GitHub Release（assets 包含 `main.js`、`manifest.json`、`styles.css`）。
 
 日常开发只需 `git push origin main`。提交到 Obsidian 社区市场是独立步骤：需向 [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) 提交 PR，在 `community-plugins.json` 中新增一条记录。
 
