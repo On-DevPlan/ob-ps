@@ -5,8 +5,11 @@ export type LinkState = "resolved" | "unresolved";
 export interface LinkRow {
   /** 源笔记路径，如 "创建链接.md" */
   sourcePath: string;
-  /** 源笔记文件创建时间(ms)——排序键 */
-  sourceCtime: number;
+  /** 源笔记文件最后修改时间(ms)——排序键
+   *  新建文件刚保存时 mtime ≈ ctime;后续修改会刷新 mtime。
+   * 用于"新建文件中的已解析双链"时按 mtime 倒序取最近修改的源笔记。
+   */
+  sourceMtime: number;
   /** 链接目标（link 文本，如 "欢迎"） */
   target: string;
   state: LinkState;
@@ -15,11 +18,11 @@ export interface LinkRow {
 }
 
 /**
- * 按 sourceCtime 降序返回新数组（最新置顶），不改入参。
- * 同 ctime 时保持原相对顺序（Array.prototype.sort 稳定）。
+ * 按 sourceMtime 降序返回新数组（最新修改置顶），不改入参。
+ * 同 mtime 时保持原相对顺序（Array.prototype.sort 稳定）。
  */
-export function sortRowsByCtimeDesc(rows: LinkRow[]): LinkRow[] {
-  return [...rows].sort((a, b) => b.sourceCtime - a.sourceCtime);
+export function sortRowsByMtimeDesc(rows: LinkRow[]): LinkRow[] {
+  return [...rows].sort((a, b) => b.sourceMtime - a.sourceMtime);
 }
 
 /** 按状态拆分为两组，保持各组内原顺序 */

@@ -2,11 +2,11 @@ import { describe, it, expect } from "vitest";
 import { collectRows, type CollectorSource } from "./link-collector";
 
 describe("collectRows", () => {
-  it("按 unresolvedTargets 分类，文件按 ctime 降序", () => {
+  it("按 unresolvedTargets 分类，文件按 mtime 降序", () => {
     const src: CollectorSource = {
       listFiles: () => [
-        { path: "a.md", ctime: 100 },
-        { path: "b.md", ctime: 200 },
+        { path: "a.md", mtime: 100 },
+        { path: "b.md", mtime: 200 },
       ],
       getLinks: (p) =>
         p === "a.md"
@@ -19,21 +19,21 @@ describe("collectRows", () => {
     expect(rows).toEqual([
       {
         sourcePath: "b.md",
-        sourceCtime: 200,
+        sourceMtime: 200,
         target: "foo",
         state: "unresolved",
         position: undefined,
       },
       {
         sourcePath: "a.md",
-        sourceCtime: 100,
+        sourceMtime: 100,
         target: "存在",
         state: "resolved",
         position: undefined,
       },
       {
         sourcePath: "a.md",
-        sourceCtime: 100,
+        sourceMtime: 100,
         target: "不存在",
         state: "unresolved",
         position: undefined,
@@ -43,7 +43,7 @@ describe("collectRows", () => {
 
   it("跳过 getLinks 返回 null 的文件", () => {
     const src: CollectorSource = {
-      listFiles: () => [{ path: "a.md", ctime: 1 }],
+      listFiles: () => [{ path: "a.md", mtime: 1 }],
       getLinks: () => null,
       unresolvedTargets: () => new Set(),
     };
@@ -52,7 +52,7 @@ describe("collectRows", () => {
 
   it("保留 entry 的 position", () => {
     const src: CollectorSource = {
-      listFiles: () => [{ path: "a.md", ctime: 1 }],
+      listFiles: () => [{ path: "a.md", mtime: 1 }],
       getLinks: () => [{ link: "x", position: { line: 5, col: 3 } }],
       unresolvedTargets: () => new Set(),
     };

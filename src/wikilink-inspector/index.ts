@@ -1,5 +1,5 @@
 export type { LinkRow, LinkState } from "./link-row";
-export { sortRowsByCtimeDesc, partitionByState } from "./link-row";
+export { sortRowsByMtimeDesc, partitionByState } from "./link-row";
 export type { CollectorSource, RawLinkEntry } from "./link-collector";
 export { collectRows } from "./link-collector";
 export { renderInspectorRow, formatCtime } from "./inspector-render";

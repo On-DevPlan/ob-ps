@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  sortRowsByCtimeDesc,
+  sortRowsByMtimeDesc,
   partitionByState,
   dedupeRowsByTarget,
   type LinkRow,
@@ -8,24 +8,24 @@ import {
 
 function row(
   sourcePath: string,
-  sourceCtime: number,
+  sourceMtime: number,
   state: LinkRow["state"] = "resolved",
 ): LinkRow {
-  return { sourcePath, sourceCtime, target: "x", state };
+  return { sourcePath, sourceMtime, target: "x", state };
 }
 
 function targetRow(
   target: string,
   sourcePath: string,
-  sourceCtime: number,
+  sourceMtime: number,
 ): LinkRow {
-  return { sourcePath, sourceCtime, target, state: "resolved" };
+  return { sourcePath, sourceMtime, target, state: "resolved" };
 }
 
-describe("sortRowsByCtimeDesc", () => {
-  it("按 sourceCtime 降序", () => {
+describe("sortRowsByMtimeDesc", () => {
+  it("按 sourceMtime 降序", () => {
     const rows = [row("a.md", 100), row("b.md", 300), row("c.md", 200)];
-    expect(sortRowsByCtimeDesc(rows).map((r) => r.sourcePath)).toEqual([
+    expect(sortRowsByMtimeDesc(rows).map((r) => r.sourcePath)).toEqual([
       "b.md",
       "c.md",
       "a.md",
@@ -34,12 +34,12 @@ describe("sortRowsByCtimeDesc", () => {
 
   it("不修改入参数组", () => {
     const rows = [row("a.md", 100), row("b.md", 300)];
-    sortRowsByCtimeDesc(rows);
-    expect(rows.map((r) => r.sourceCtime)).toEqual([100, 300]);
+    sortRowsByMtimeDesc(rows);
+    expect(rows.map((r) => r.sourceMtime)).toEqual([100, 300]);
   });
 
   it("空数组返回空数组", () => {
-    expect(sortRowsByCtimeDesc([])).toEqual([]);
+    expect(sortRowsByMtimeDesc([])).toEqual([]);
   });
 });
 
@@ -57,7 +57,7 @@ describe("partitionByState", () => {
 });
 
 describe("dedupeRowsByTarget", () => {
-  it("同目标只保留首次出现（配合 ctime 降序 = 保留最新）", () => {
+  it("同目标只保留首次出现（配合 mtime 降序 = 保留最新）", () => {
     const rows = [
       targetRow("欢迎", "new.md", 300),
       targetRow("欢迎", "old.md", 100),

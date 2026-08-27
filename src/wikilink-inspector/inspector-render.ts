@@ -1,13 +1,17 @@
 import type { LinkRow } from "./link-row";
 
-/** 源笔记名（去 .md 后缀） */
+/**
+ * 源笔记名（去 .md 后缀） */
 function sourceBaseName(sourcePath: string): string {
   return sourcePath.replace(/\.md$/i, "");
 }
 
 /**
- * 创建时间显示：当年用 MM-DD HH:mm，跨年用 YYYY-MM-DD。
+ * 最后修改时间显示：当年用 MM-DD HH:mm，跨年用 YYYY-MM-DD。
  * 用 Obsidian 注入的全局 moment。
+ *
+ * 命名沿用 formatCtime 是因为 ListItemCache / inspector-row 历史上用 ctime
+ * 区分"创建时间"——现改为 mtime(修改时间),但函数名保留以最小化 churn。
  */
 export function formatCtime(ctime: number): string {
   const m = window.moment(ctime);
@@ -35,7 +39,7 @@ export function renderInspectorRow(
     text: `·「${sourceBaseName(row.sourcePath)}」`,
   });
 
-  el.createSpan({ cls: "wli-time", text: formatCtime(row.sourceCtime) });
+  el.createSpan({ cls: "wli-time", text: formatCtime(row.sourceMtime) });
 
   el.setAttr("title", `${row.target}\n来自 ${row.sourcePath}`);
   el.addEventListener("click", () => onClick(row));

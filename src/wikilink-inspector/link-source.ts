@@ -12,7 +12,7 @@ import type { CollectorSource, RawLinkEntry } from "./link-collector";export fun
     listFiles() {
       return app.vault.getMarkdownFiles().map((f) => ({
         path: f.path,
-        ctime: f.stat.ctime,
+        mtime: f.stat.mtime,
       }));
     },
     getLinks(path) {

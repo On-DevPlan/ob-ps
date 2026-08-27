@@ -59,6 +59,10 @@ import { buildBklinkGraph } from "../link-tree/topic-resolver";
 export class MergedRunnerInspectorView extends ItemView {
   // WLI state
   private rows: LinkRow[] = [];
+  /** 已解析双链快照 —— 只在 vault.on("create") 时重算,旧文件修改不更新。
+   * 与 this.rows(热更新全量)分开:未解析列表需要即时反映旧笔记里写的 [[x]],
+   * 而已解析列表严格反映"新建文件里的引用"。 */
+  private resolvedRows: LinkRow[] = [];
   private readonly limit: Record<"resolved" | "unresolved", number> = {
     resolved: DEFAULT_PREVIEW,
     unresolved: DEFAULT_PREVIEW,
@@ -85,6 +89,10 @@ export class MergedRunnerInspectorView extends ItemView {
   private procBtnGridEl!: HTMLElement;
   private wliZoneEl!: HTMLElement;
   private wliBodyEl!: HTMLElement;
+  /** 未解析双链容器(changed 热更新时只重建它) */
+  private wliUnresolvedWrapEl!: HTMLElement;
+  /** 已解析双链容器(vault.on("create") 时只重建它) */
+  private wliResolvedWrapEl!: HTMLElement;
   private wliChevronEl!: HTMLElement;
   private wliCollapsed = false;
   private procZoneEl!: HTMLElement;
@@ -122,7 +130,7 @@ export class MergedRunnerInspectorView extends ItemView {
           position: event.position,
           target: event.target,
           state: "resolved",
-          sourceCtime: event.firstSeenAt,
+          sourceMtime: event.firstSeenAt,
         });
         // WLI 列表走 400ms 防抖(重算行成本高)
         this.scheduleWliRefresh();
@@ -152,7 +160,10 @@ export class MergedRunnerInspectorView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.buildUi();
+    // 首次加载:refreshWli 重算全量 rows + 渲染未解析容器 + 树;
+    // refreshResolved 基于同一 rows 算已解析快照 + 渲染已解析容器。
     this.refreshWli();
+    this.refreshResolved();
     // 用户切到不同笔记(主区 active leaf 变化)→ 树立即高亮新节点
     // 这个监听器与进程生命周期无关,常驻
     this.registerEvent(
@@ -163,17 +174,24 @@ export class MergedRunnerInspectorView extends ItemView {
         this.treeView.updateFromApp(treeEvents, this.app, newActive);
       }),
     );
-    // WLI 列表热刷新：vault 中任何 .md 完成链接解析(新建/修改) → 重算 unresolved。
-    // 否则用户在某条笔记里写下 [[target]] 后,侧边栏列表不会即时出现该未解析。
+    // ── WLI 刷新触发器:两个列表分开刷新 ──
     //
-    // 必须用 'changed' 而不是 'resolved':
-    //   - 'changed' : 文件索引更新即触发(覆盖新写入的 [[target]])
-    //   - 'resolved': 仅在该文件「所有 [[]] 都能解析」时触发 —— target 不存在时不会触发,
-    //                  这正是 wikilink 检查的需求场景,选错事件导致列表永不更新。
-    // 见 https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache/on
+    // 1) 未解析双链 → metadataCache.on("changed"):
+    //    在旧笔记里写 [[target]] 保存后,侧边栏应立即出现该未解析。
+    //    必须用 'changed' 而不是 'resolved':changed 在文件索引更新时触发,
+    //    覆盖新写入的 [[target]];resolved 仅在文件所有 [[]] 都能解析时触发,
+    //    target 不存在时不会触发 —— 那正是未解析检查的场景。
     this.registerEvent(
       this.app.metadataCache.on("changed", () => {
         this.scheduleWliRefresh();
+      }),
+    );
+    // 2) 已解析双链 → vault.on("create"):
+    //    严格限制为「新文件创建」。旧文件里写双链/修改保存不会刷新已解析列表,
+    //    避免把不该出现的旧文件引用塞进"新建文件中的已解析双链"。
+    this.registerEvent(
+      this.app.vault.on("create", () => {
+        this.scheduleResolvedRefresh();
       }),
     );
     if (this.pendingConfigs) {
@@ -450,6 +468,10 @@ export class MergedRunnerInspectorView extends ItemView {
     head.appendChild(clearBtn);
 
     this.wliBodyEl = this.wliZoneEl.createDiv({ cls: "zone-wli-body" });
+    // 两个独立容器:未解析/已解析各自清空重建,互不干扰。
+    // 未解析由 metadataCache.on("changed") 热更新,已解析由 vault.on("create") 更新。
+    this.wliUnresolvedWrapEl = this.wliBodyEl.createDiv({ cls: "wli-unresolved-wrap" });
+    this.wliResolvedWrapEl = this.wliBodyEl.createDiv({ cls: "wli-resolved-wrap" });
 
     head.addEventListener("click", () => {
       this.wliCollapsed = !this.wliCollapsed;
@@ -661,9 +683,12 @@ export class MergedRunnerInspectorView extends ItemView {
     }
   }
 
+  /** 热更新路径(metadataCache.on("changed") 触发):重算全量 rows + 树。
+   * 未解析列表需即时反映旧笔记里写的 [[target]],所以每次都重渲未解析部分。
+   * 不碰 this.resolvedRows 的渲染 —— 已解析列表严格由 vault.on("create") 控制。 */
   private refreshWli(): void {
     this.rows = collectRows(makeSource(this.app));
-    this.renderWliAll();
+    this.renderUnresolvedSubsection();
     // 完善历史树:有事件或已挂载则更新
     try {
       const events = this.opts.getLinkTreeEvents();
@@ -676,6 +701,22 @@ export class MergedRunnerInspectorView extends ItemView {
     } catch (e) {
       console.warn("[link-tree] update failed", e);
     }
+  }
+
+  /** 新文件创建路径(vault.on("create") 触发):重算已解析快照。
+   * 只有新文件创建才刷新已解析列表,旧文件修改不进入该列表。
+   * 复用 this.rows(已由 refreshWli 或首次 collectRows 算出),不重复收集。 */
+  private refreshResolved(): void {
+    if (this.rows.length === 0 && !this.wliResolvedWrapEl) return;
+    const { resolved } = partitionByState(this.rows);
+    this.resolvedRows = dedupeRowsByTarget(resolved);
+    this.renderResolvedSubsection();
+  }
+
+  private scheduleResolvedRefresh(): void {
+    window.setTimeout(() => {
+      this.refreshResolved();
+    }, REFRESH_DEBOUNCE_MS);
   }
 
   /** 双链树切换按钮点击 —— 显示/隐藏整个 tree zone */
@@ -792,6 +833,8 @@ export class MergedRunnerInspectorView extends ItemView {
 
     new Notice(`已清除 ${totalApplied} 条未解析双链（${filesTouched} 个文件）`);
     this.refreshWli();
+    // 清除改变了已解析/未解析状态,已解析快照也要同步重算
+    this.refreshResolved();
   }
 
   private scheduleWliRefresh(): void {
@@ -802,20 +845,18 @@ export class MergedRunnerInspectorView extends ItemView {
     }, REFRESH_DEBOUNCE_MS);
   }
 
+  /** 全量重渲:清空两个容器,分别渲染未解析 + 已解析。
+   * 用于初始 onOpen / 清除未解析后 / resolvedRecentLimit 设置变更。
+   * 热更新路径不用它(changed 只重建未解析,create 只重建已解析)。 */
   private renderWliAll(): void {
-    this.wliBodyEl.empty();
+    this.wliUnresolvedWrapEl.empty();
+    this.wliResolvedWrapEl.empty();
 
     const { unresolved, resolved } = partitionByState(this.rows);
-    const dedupedResolved = dedupeRowsByTarget(resolved);
-    const resolvedLimit = this.opts.settings.resolvedRecentLimit ?? 10;
-    const shownResolved = dedupedResolved.slice(0, resolvedLimit);
+    this.resolvedRows = dedupeRowsByTarget(resolved);
+    this.updateWliTitle(unresolved.length, this.resolvedRows.length);
 
-    const titleEl = this.wliZoneEl.querySelector(".zone-head-title");
-    if (titleEl) {
-      titleEl.setText(`双链列表 · 未解析 ${unresolved.length} · 已解析 ${shownResolved.length}/${dedupedResolved.length}`);
-    }
-
-    this.renderWliSubsection({
+    this.renderWliSubsection(this.wliUnresolvedWrapEl, {
       title: "未解析双链",
       emptyText: "没有未解析双链",
       rows: unresolved,
@@ -823,29 +864,78 @@ export class MergedRunnerInspectorView extends ItemView {
       limit: this.limit.unresolved,
       onLoadMore: () => {
         this.limit.unresolved += DEFAULT_PREVIEW;
-        this.renderWliAll();
+        this.renderUnresolvedSubsection();
       },
     });
 
-    this.renderWliSubsection({
-      title: "最新已解析双链",
+    this.renderWliSubsection(this.wliResolvedWrapEl, {
+      title: "新建文件中的已解析双链",
       emptyText: "暂无已解析双链",
-      rows: dedupedResolved,
+      rows: this.resolvedRows,
       state: "resolved",
-      limit: resolvedLimit,
+      limit: this.opts.settings.resolvedRecentLimit ?? 10,
       onLoadMore: null,
     });
   }
 
-  private renderWliSubsection(options: {
-    title: string;
-    emptyText: string;
-    rows: LinkRow[];
-    state: "resolved" | "unresolved";
-    limit: number;
-    onLoadMore: (() => void) | null;
-  }): void {
-    const section = this.wliBodyEl.createDiv({ cls: `wli-subsection is-${options.state}` });
+  /** 只重建未解析容器(changed 热更新 / 未解析 load-more 用)。 */
+  private renderUnresolvedSubsection(): void {
+    this.wliUnresolvedWrapEl.empty();
+    const { unresolved } = partitionByState(this.rows);
+    this.updateWliTitle(unresolved.length, this.resolvedRows.length);
+
+    this.renderWliSubsection(this.wliUnresolvedWrapEl, {
+      title: "未解析双链",
+      emptyText: "没有未解析双链",
+      rows: unresolved,
+      state: "unresolved",
+      limit: this.limit.unresolved,
+      onLoadMore: () => {
+        this.limit.unresolved += DEFAULT_PREVIEW;
+        this.renderUnresolvedSubsection();
+      },
+    });
+  }
+
+  /** 只重建已解析容器(vault.on("create") 触发)。 */
+  private renderResolvedSubsection(): void {
+    this.wliResolvedWrapEl.empty();
+    const { unresolved } = partitionByState(this.rows);
+    this.updateWliTitle(unresolved.length, this.resolvedRows.length);
+
+    this.renderWliSubsection(this.wliResolvedWrapEl, {
+      title: "新建文件中的已解析双链",
+      emptyText: "暂无已解析双链",
+      rows: this.resolvedRows,
+      state: "resolved",
+      limit: this.opts.settings.resolvedRecentLimit ?? 10,
+      onLoadMore: null,
+    });
+  }
+
+  /** 更新 zone 头部标题栏:未解析 N · 已解析 M/total */
+  private updateWliTitle(unresolvedCount: number, resolvedCount: number): void {
+    const titleEl = this.wliZoneEl.querySelector(".zone-head-title");
+    if (!titleEl) return;
+    const resolvedLimit = this.opts.settings.resolvedRecentLimit ?? 10;
+    const shownResolved = Math.min(resolvedCount, resolvedLimit);
+    titleEl.setText(
+      `双链列表 · 未解析 ${unresolvedCount} · 已解析 ${shownResolved}/${resolvedCount}`,
+    );
+  }
+
+  private renderWliSubsection(
+    container: HTMLElement,
+    options: {
+      title: string;
+      emptyText: string;
+      rows: LinkRow[];
+      state: "resolved" | "unresolved";
+      limit: number;
+      onLoadMore: (() => void) | null;
+    },
+  ): void {
+    const section = container.createDiv({ cls: `wli-subsection is-${options.state}` });
     section.createDiv({
       cls: "wli-subsection-title",
       text: `${options.title} (${Math.min(options.rows.length, options.limit)}/${options.rows.length})`,
