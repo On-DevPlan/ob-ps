@@ -24,8 +24,7 @@ export interface CollectorSource {
  * 文件按 mtime 降序遍历，每个文件内链接按原顺序输出。
  *
  * mtime 语义：新建文件刚保存时 mtime ≈ ctime（创建时间），后续修改会刷新 mtime。
- * 用于"新建文件中的已解析双链"列表时，mtime 反映"该引用最近一次落盘的时间"，
- * 是"新文件创建"事件的最自然代理。
+ * 用于未解析双链列表(侧边栏「未解析双链」)时按 mtime 倒序取最近修改的源笔记。
  */
 export function collectRows(source: CollectorSource): LinkRow[] {
   const files = source.listFiles().slice().sort((a, b) => b.mtime - a.mtime);

@@ -7,7 +7,7 @@ export interface LinkRow {
   sourcePath: string;
   /** 源笔记文件最后修改时间(ms)——排序键
    *  新建文件刚保存时 mtime ≈ ctime;后续修改会刷新 mtime。
-   * 用于"新建文件中的已解析双链"时按 mtime 倒序取最近修改的源笔记。
+   *  用于未解析双链列表时按 mtime 倒序取最近修改的源笔记。
    */
   sourceMtime: number;
   /** 链接目标（link 文本，如 "欢迎"） */

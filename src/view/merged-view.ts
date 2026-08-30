@@ -12,8 +12,10 @@ import {
   stopProcess,
 } from "../runner";
 import { collectRows } from "../wikilink-inspector/link-collector";
-import { partitionByState, dedupeRowsByTarget, type LinkRow } from "../wikilink-inspector/link-row";
-import { renderInspectorRow } from "../wikilink-inspector/inspector-render";
+import { partitionByState, type LinkRow } from "../wikilink-inspector/link-row";
+import { renderInspectorRow, formatCtime } from "../wikilink-inspector/inspector-render";
+import { collectNewFiles, type NewFileEntry } from "../wikilink-inspector/new-files";
+import { makeNewFilesSource } from "../wikilink-inspector/link-source";
 import { ClearUnresolvedConfirmModal } from "../wikilink-inspector/clear-unresolved-modal";
 import { makeUnresolvedSource } from "../wikilink-inspector/clear-unresolved";
 import { type FormMode } from "./process-form";
@@ -59,10 +61,9 @@ import { buildBklinkGraph } from "../link-tree/topic-resolver";
 export class MergedRunnerInspectorView extends ItemView {
   // WLI state
   private rows: LinkRow[] = [];
-  /** 已解析双链快照 —— 只在 vault.on("create") 时重算,旧文件修改不更新。
-   * 与 this.rows(热更新全量)分开:未解析列表需要即时反映旧笔记里写的 [[x]],
-   * 而已解析列表严格反映"新建文件里的引用"。 */
-  private resolvedRows: LinkRow[] = [];
+  /** 新建文件列表 —— 只在 vault.on("create") 时重算,旧文件修改不更新。
+   * 直接列出按 creatime 排序的新建文件本身(不再按链接展示 target)。 */
+  private newFiles: NewFileEntry[] = [];
   private readonly limit: Record<"resolved" | "unresolved", number> = {
     resolved: DEFAULT_PREVIEW,
     unresolved: DEFAULT_PREVIEW,
@@ -186,9 +187,9 @@ export class MergedRunnerInspectorView extends ItemView {
         this.scheduleWliRefresh();
       }),
     );
-    // 2) 已解析双链 → vault.on("create"):
-    //    严格限制为「新文件创建」。旧文件里写双链/修改保存不会刷新已解析列表,
-    //    避免把不该出现的旧文件引用塞进"新建文件中的已解析双链"。
+    // 2) 「新建文件」→ vault.on("create"):
+    //    严格限制为「新文件创建」。旧文件里写双链/修改保存不会刷新新建文件列表,
+    //    避免把旧文件改动塞进"新建文件"列表。
     this.registerEvent(
       this.app.vault.on("create", () => {
         this.scheduleResolvedRefresh();
@@ -384,7 +385,7 @@ export class MergedRunnerInspectorView extends ItemView {
     this.treeToggleBtnEl.createSpan({ text: "显示双链树" });
     this.treeToggleBtnEl.addEventListener("click", () => this.toggleTreeContainer());
 
-    // ===== Zone 2: 双链列表（未解析 + 最新已解析） =====
+    // ===== Zone 2: 双链列表（未解析 + 新建文件） =====
     this.wliZoneEl = root.createDiv({ cls: "merged-zone merged-zone-wli" });
     this.buildWliSection();
 
@@ -685,7 +686,7 @@ export class MergedRunnerInspectorView extends ItemView {
 
   /** 热更新路径(metadataCache.on("changed") 触发):重算全量 rows + 树。
    * 未解析列表需即时反映旧笔记里写的 [[target]],所以每次都重渲未解析部分。
-   * 不碰 this.resolvedRows 的渲染 —— 已解析列表严格由 vault.on("create") 控制。 */
+   * 「新建文件」列表严格由 vault.on("create") 控制,不走此热更新。 */
   private refreshWli(): void {
     this.rows = collectRows(makeSource(this.app));
     this.renderUnresolvedSubsection();
@@ -703,14 +704,11 @@ export class MergedRunnerInspectorView extends ItemView {
     }
   }
 
-  /** 新文件创建路径(vault.on("create") 触发):重算已解析快照。
-   * 只有新文件创建才刷新已解析列表,旧文件修改不进入该列表。
-   * 复用 this.rows(已由 refreshWli 或首次 collectRows 算出),不重复收集。 */
+  /** 新文件创建路径(vault.on("create") 触发):重算「新建文件」列表。
+   * 先重算 collectNewFiles(避免用 stale 快照漏掉刚创建的文件),再渲染。 */
   private refreshResolved(): void {
-    if (this.rows.length === 0 && !this.wliResolvedWrapEl) return;
-    const { resolved } = partitionByState(this.rows);
-    this.resolvedRows = dedupeRowsByTarget(resolved);
-    this.renderResolvedSubsection();
+    this.newFiles = collectNewFiles(makeNewFilesSource(this.app));
+    this.renderNewFilesSubsection();
   }
 
   private scheduleResolvedRefresh(): void {
@@ -852,9 +850,9 @@ export class MergedRunnerInspectorView extends ItemView {
     this.wliUnresolvedWrapEl.empty();
     this.wliResolvedWrapEl.empty();
 
-    const { unresolved, resolved } = partitionByState(this.rows);
-    this.resolvedRows = dedupeRowsByTarget(resolved);
-    this.updateWliTitle(unresolved.length, this.resolvedRows.length);
+    const { unresolved } = partitionByState(this.rows);
+    this.newFiles = collectNewFiles(makeNewFilesSource(this.app));
+    this.updateWliTitle(unresolved.length, this.newFiles.length);
 
     this.renderWliSubsection(this.wliUnresolvedWrapEl, {
       title: "未解析双链",
@@ -868,21 +866,14 @@ export class MergedRunnerInspectorView extends ItemView {
       },
     });
 
-    this.renderWliSubsection(this.wliResolvedWrapEl, {
-      title: "新建文件中的已解析双链",
-      emptyText: "暂无已解析双链",
-      rows: this.resolvedRows,
-      state: "resolved",
-      limit: this.opts.settings.resolvedRecentLimit ?? 10,
-      onLoadMore: null,
-    });
+    this.renderNewFilesSubsection();
   }
 
   /** 只重建未解析容器(changed 热更新 / 未解析 load-more 用)。 */
   private renderUnresolvedSubsection(): void {
     this.wliUnresolvedWrapEl.empty();
     const { unresolved } = partitionByState(this.rows);
-    this.updateWliTitle(unresolved.length, this.resolvedRows.length);
+    this.updateWliTitle(unresolved.length, this.newFiles.length);
 
     this.renderWliSubsection(this.wliUnresolvedWrapEl, {
       title: "未解析双链",
@@ -897,30 +888,55 @@ export class MergedRunnerInspectorView extends ItemView {
     });
   }
 
-  /** 只重建已解析容器(vault.on("create") 触发)。 */
-  private renderResolvedSubsection(): void {
+  /** 只重建「新建文件」容器(vault.on("create") 触发)。 */
+  private renderNewFilesSubsection(): void {
     this.wliResolvedWrapEl.empty();
     const { unresolved } = partitionByState(this.rows);
-    this.updateWliTitle(unresolved.length, this.resolvedRows.length);
+    this.updateWliTitle(unresolved.length, this.newFiles.length);
 
-    this.renderWliSubsection(this.wliResolvedWrapEl, {
-      title: "新建文件中的已解析双链",
-      emptyText: "暂无已解析双链",
-      rows: this.resolvedRows,
-      state: "resolved",
-      limit: this.opts.settings.resolvedRecentLimit ?? 10,
-      onLoadMore: null,
+    const limit = this.opts.settings.resolvedRecentLimit ?? 10;
+    const section = this.wliResolvedWrapEl.createDiv({ cls: "wli-subsection is-resolved" });
+    section.createDiv({
+      cls: "wli-subsection-title",
+      text: `新建文件 (${Math.min(this.newFiles.length, limit)}/${this.newFiles.length})`,
     });
+
+    if (this.newFiles.length === 0) {
+      section.createDiv({ cls: "wli-empty", text: "暂无新建文件" });
+      return;
+    }
+
+    for (const f of this.newFiles.slice(0, limit)) {
+      this.renderNewFileRow(section, f);
+    }
   }
 
-  /** 更新 zone 头部标题栏:未解析 N · 已解析 M/total */
-  private updateWliTitle(unresolvedCount: number, resolvedCount: number): void {
+  /** 渲染一个新建文件行:文件名 + 创建时间,点击打开该文件 */
+  private renderNewFileRow(parent: HTMLElement, file: NewFileEntry): void {
+    const el = parent.createDiv({ cls: "wli-row is-resolved" });
+    el.createDiv({ cls: "wli-dot is-resolved" });
+    el.createSpan({ cls: "wli-target", text: file.path.replace(/\.md$/i, "") });
+    el.createSpan({ cls: "wli-time", text: file.creatime === null ? "" : formatCtime(file.creatime) });
+    el.setAttr("title", file.path);
+    el.addEventListener("click", () => void this.openNewFile(file.path));
+  }
+
+  /** 打开指定路径的文件(新建文件列表点击) */
+  private async openNewFile(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) return;
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.openFile(file);
+  }
+
+  /** 更新 zone 头部标题栏:未解析 N · 新建文件 M/total */
+  private updateWliTitle(unresolvedCount: number, newFileCount: number): void {
     const titleEl = this.wliZoneEl.querySelector(".zone-head-title");
     if (!titleEl) return;
     const resolvedLimit = this.opts.settings.resolvedRecentLimit ?? 10;
-    const shownResolved = Math.min(resolvedCount, resolvedLimit);
+    const shownNew = Math.min(newFileCount, resolvedLimit);
     titleEl.setText(
-      `双链列表 · 未解析 ${unresolvedCount} · 已解析 ${shownResolved}/${resolvedCount}`,
+      `双链列表 · 未解析 ${unresolvedCount} · 新建文件 ${shownNew}/${newFileCount}`,
     );
   }
 
@@ -960,7 +976,7 @@ export class MergedRunnerInspectorView extends ItemView {
     }
   }
 
-  /** 设置页改动「最新已解析双链数量」后调用:view 已 build 时即时重渲 */
+  /** 设置页改动「新建文件数量」后调用:view 已 build 时即时重渲 */
   notifyResolvedLimitChanged(): void {
     this.renderWliAll();
   }

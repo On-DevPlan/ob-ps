@@ -17,13 +17,11 @@ const prod = process.argv[2] === "--production";
 const localOutFile = path.join(__dirname, "main.js");
 
 /** vault 插件目录。
- * 默认指向项目内嵌 vault (123/.obsidian),让开发者日常打开即可看到最新构建。
- * 可通过环境变量 LOCAL_RUNNER_VAULT 覆盖。
+ * 默认指向真实库 (D:\code\a_md\obsidian_init) 的插件目录,让构建产物直接落地到
+ * 日常使用的 Obsidian vault。可通过环境变量 LOCAL_RUNNER_VAULT 覆盖。
  */
 const projectLocalVault = path.resolve(
-  __dirname,
-  "..",
-  "123",
+  "D:\\code\\a_md\\obsidian_init",
   ".obsidian",
   "plugins",
   "local-runner",

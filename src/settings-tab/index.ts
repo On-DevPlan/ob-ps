@@ -33,7 +33,7 @@ export interface SettingTabHost {
   applyWikilinkStyle(): void;
   /** 命令组变更后通知侧边栏视图(可选,缺失则只持久化不热更新) */
   notifyCommandGroupsChanged?: () => void;
-  /** 「最新已解析双链」条数变更后通知侧边栏视图重渲(可选) */
+  /** 「新建文件」条数变更后通知侧边栏视图重渲(可选) */
   notifyResolvedLimitChanged?: () => void;
   /** linkTree 事件分组统计(section-link-tree 用) */
   listLinkTreeTopics?(): Array<{ topicRoot: string | undefined; count: number; latestScan: number }>;

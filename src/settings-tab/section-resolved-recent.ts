@@ -33,14 +33,14 @@ function clampResolvedRecentLimit(n: number): number {
   return n;
 }
 
-/** 渲染「最新已解析双链数量」数值输入设置项 */
+/** 渲染「新建文件数量」数值输入设置项 */
 export function render(
   containerEl: HTMLElement,
   host: ResolvedRecentSectionHost,
 ): void {
   new Setting(containerEl)
-    .setName("最新已解析双链数量")
-    .setDesc("侧边栏「最新已解析双链」区块显示的条数(按目标去重、按创建时间倒序)")
+    .setName("新建文件数量")
+    .setDesc("侧边栏「新建文件」区块显示的条数(按 frontmatter creatime 倒序)")
     .addText((text) => {
       text
         .setPlaceholder(`${MIN_RESOLVED_RECENT_LIMIT}-${MAX_RESOLVED_RECENT_LIMIT}`)

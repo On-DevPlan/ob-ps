@@ -4,8 +4,8 @@
  * 设计契约(2026-08 修复):
  *   · 未解析双链:由 metadataCache.on("changed") 热更新 —— 在旧笔记里写 [[target]]
  *     保存后,侧边栏应立即出现该未解析。
- *   · 已解析双链:由 vault.on("create") 更新 —— 「新建文件中的已解析双链」严格反映
- *     新文件创建行为,旧文件修改(包括加 [[双链]])不应让列表出现干扰项。
+ *   · 「新建文件」:由 vault.on("create") 更新 —— 严格反映新文件创建行为,
+ *     旧文件修改(包括加 [[双链]])不应让列表出现干扰项。
  *   · 两个列表用独立容器(wliUnresolvedWrapEl / wliResolvedWrapEl)分开渲染。
  *
  * 测试方式:读取源码做静态校验。原因:
@@ -58,8 +58,9 @@ describe("MergedRunnerInspectorView WLI 触发器契约", () => {
     );
   });
 
-  it("「新建文件中的已解析双链」subsection 标题已更新", () => {
-    expect(src).toContain('title: "新建文件中的已解析双链"');
+  it("「新建文件」subsection 标题已更新(不再显示「已解析双链」)", () => {
+    expect(src).toContain("`新建文件 (");
+    expect(src).not.toContain('title: "新建文件中的已解析双链"');
     expect(src).not.toContain('title: "最新已解析双链"');
   });
 
@@ -70,11 +71,12 @@ describe("MergedRunnerInspectorView WLI 触发器契约", () => {
 });
 
 /**
- * 行为层契约:旧文件修改不应让旧文件中的双链进入"新建文件中的已解析双链"列表。
+ * 行为层契约:旧文件修改不应让旧文件中的双链进入「未解析双链」列表以外的地方。
+ * 「新建文件」列表由 vault.on("create") 触发重建,旧文件改动不进入。
  *
  * collectRows + dedupeRowsByTarget 本身不做时间窗口过滤(旧文件双链会被收集)——
- * 真正的过滤由「已解析刷新只挂 vault.on('create')」这一架构决策保证:
- * 旧文件修改不触发 refreshResolved,旧行不会进入已解析快照的渲染。
+ * 真正的过滤由「新建文件刷新只挂 vault.on('create')」这一架构决策保证:
+ * 旧文件修改不触发 refreshResolved,旧行不会进入新建文件列表的渲染。
  */
 import { collectRows, type CollectorSource } from "../wikilink-inspector/link-collector";
 import { partitionByState, dedupeRowsByTarget } from "../wikilink-inspector/link-row";

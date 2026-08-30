@@ -12,8 +12,11 @@ function sourceBaseName(sourcePath: string): string {
  *
  * 命名沿用 formatCtime 是因为 ListItemCache / inspector-row 历史上用 ctime
  * 区分"创建时间"——现改为 mtime(修改时间),但函数名保留以最小化 churn。
+ *
+ * mtime 为 -Infinity(缺失 creatime,严格排最后)时渲染空串,不产生垃圾日期。
  */
 export function formatCtime(ctime: number): string {
+  if (ctime === Number.NEGATIVE_INFINITY) return "";
   const m = window.moment(ctime);
   const now = window.moment();
   return m.isSame(now, "year") ? m.format("MM-DD HH:mm") : m.format("YYYY-MM-DD");
