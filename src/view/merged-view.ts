@@ -62,7 +62,7 @@ export class MergedRunnerInspectorView extends ItemView {
   // WLI state
   private rows: LinkRow[] = [];
   /** 新建文件列表 —— 只在 vault.on("create") 时重算,旧文件修改不更新。
-   * 直接列出按 creatime 排序的新建文件本身(不再按链接展示 target)。 */
+   * 直接列出按文件系统创建时间(ctime)排序的新建文件本身(不再按链接展示 target)。 */
   private newFiles: NewFileEntry[] = [];
   private readonly limit: Record<"resolved" | "unresolved", number> = {
     resolved: DEFAULT_PREVIEW,
@@ -916,7 +916,7 @@ export class MergedRunnerInspectorView extends ItemView {
     const el = parent.createDiv({ cls: "wli-row is-resolved" });
     el.createDiv({ cls: "wli-dot is-resolved" });
     el.createSpan({ cls: "wli-target", text: file.path.replace(/\.md$/i, "") });
-    el.createSpan({ cls: "wli-time", text: file.creatime === null ? "" : formatCtime(file.creatime) });
+    el.createSpan({ cls: "wli-time", text: formatCtime(file.ctime) });
     el.setAttr("title", file.path);
     el.addEventListener("click", () => void this.openNewFile(file.path));
   }

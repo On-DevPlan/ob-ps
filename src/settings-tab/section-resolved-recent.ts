@@ -40,7 +40,7 @@ export function render(
 ): void {
   new Setting(containerEl)
     .setName("新建文件数量")
-    .setDesc("侧边栏「新建文件」区块显示的条数(按 frontmatter creatime 倒序)")
+    .setDesc("侧边栏「新建文件」区块显示的条数(按文件创建时间 ctime 倒序)")
     .addText((text) => {
       text
         .setPlaceholder(`${MIN_RESOLVED_RECENT_LIMIT}-${MAX_RESOLVED_RECENT_LIMIT}`)

@@ -10,53 +10,13 @@ import { TFile } from "obsidian";
 import type { CollectorSource, RawLinkEntry } from "./link-collector";
 import type { NewFilesSource } from "./new-files";
 
-/**
- * 解析 frontmatter `creatime` 为毫秒时间戳。
- * 仓库统一格式:`YYYY-MM-DD HH:mm:ss`(本地时间,无时区后缀)。
- * 模板占位符 `${now}`、其它格式、非法输入 → 返回 null(调用方按"缺失"处理)。
- */
-export function parseCreatime(value: unknown): number | null {
-  if (typeof value !== "string") return null;
-  const t = value.trim();
-  if (t.length === 0) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(t);
-  if (!m) return null;
-  const [, yy, mm, dd, hh, mi, ss] = m;
-  const date = new Date(
-    Number(yy),
-    Number(mm) - 1,
-    Number(dd),
-    Number(hh),
-    Number(mi),
-    Number(ss),
-  );
-  // 本地时区构造不会产生 NaN,但越界会 rollover —— 校验各字段回读一致。
-  if (
-    date.getFullYear() !== Number(yy) ||
-    date.getMonth() !== Number(mm) - 1 ||
-    date.getDate() !== Number(dd) ||
-    date.getHours() !== Number(hh) ||
-    date.getMinutes() !== Number(mi) ||
-    date.getSeconds() !== Number(ss)
-  ) {
-    return null;
-  }
-  return date.getTime();
-}
-
-/** 从 frontmatter 读 creatime;缺失/无效返回 null */
-function readCreatime(app: App, file: unknown): number | null {
-  const cache = app.metadataCache.getFileCache(file as never);
-  return cache?.frontmatter ? parseCreatime(cache.frontmatter["creatime"]) : null;
-}
-
-/** 适配「新建文件」列表:每个文件 → path + creatime(缺失 → null) */
+/** 适配「新建文件」列表:每个文件 → path + 文件系统创建时间(ctime) */
 export function makeNewFilesSource(app: App): NewFilesSource {
   return {
     listFiles() {
       return app.vault.getMarkdownFiles().map((f) => ({
         path: f.path,
-        creatime: readCreatime(app, f),
+        ctime: f.stat.ctime,
       }));
     },
   };
@@ -67,9 +27,8 @@ export function makeSource(app: App): CollectorSource {
     listFiles() {
       return app.vault.getMarkdownFiles().map((f) => ({
         path: f.path,
-        // 排序键:mtime 字段承载 creatime(解析成功);缺失/无效 → -Infinity,
-        // collectRows 的 b.mtime - a.mtime 降序会把它排在最后(严格排最后)。
-        mtime: readCreatime(app, f) ?? Number.NEGATIVE_INFINITY,
+        // 排序键/展示时间:统一用文件系统创建时间(ctime),不再解析 frontmatter。
+        mtime: f.stat.ctime,
       }));
     },
     getLinks(path) {

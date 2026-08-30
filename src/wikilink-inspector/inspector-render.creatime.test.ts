@@ -24,9 +24,4 @@ describe("formatCtime", () => {
     formatCtime(1781687605000);
     expect(formatSpy).toHaveBeenCalled();
   });
-
-  it("-Infinity(缺失 creatime)渲染为空字符串,不产生垃圾日期", () => {
-    installMomentStub();
-    expect(formatCtime(Number.NEGATIVE_INFINITY)).toBe("");
-  });
 });

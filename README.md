@@ -63,7 +63,7 @@ Settings → Local Runner is split into three tabs.
 
 ### Wikilink tab
 - **Highlight wikilinks** — toggle internal-link highlighting, and pick colors for resolved and unresolved links in light and dark themes.
-- **New-files limit** — how many of the newest notes the sidebar's "New files" section shows (1–50). Ordered by frontmatter `creatime` descending; notes missing `creatime` sort last.
+- **New-files limit** — how many of the newest notes the sidebar's "New files" section shows (1–50). Ordered by file creation time (ctime) descending.
 - **Wikilink-tree data** (collapsed by default) — grouped statistics of scan events by topic root, with a delete button per topic and a clear-all action. Use this to purge legacy events or wipe the tree history.
 
 ### Skill tab

@@ -1,42 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { collectRows } from "./link-collector";
-import { makeSource, makeNewFilesSource, parseCreatime } from "./link-source";
+import { makeSource, makeNewFilesSource } from "./link-source";
 
 // ---------------------------------------------------------------------------
-// parseCreatime — 纯函数:frontmatter creatime 字符串 → 毫秒时间戳
-// ---------------------------------------------------------------------------
-describe("parseCreatime", () => {
-  it("解析 YYYY-MM-DD HH:mm:ss 为毫秒时间戳", () => {
-    expect(parseCreatime("2026-06-17 17:13:25")).toBe(
-      new Date(2026, 5, 17, 17, 13, 25).getTime(),
-    );
-  });
-
-  it("解析无效字符串返回 null", () => {
-    expect(parseCreatime("not-a-date")).toBeNull();
-    expect(parseCreatime("")).toBeNull();
-  });
-
-  it("模板占位符 ${now} 返回 null", () => {
-    expect(parseCreatime("${now}")).toBeNull();
-  });
-
-  it("无效日期(越界)返回 null", () => {
-    expect(parseCreatime("2026-13-45 99:99:99")).toBeNull();
-  });
-
-  it("非字符串输入返回 null", () => {
-    expect(parseCreatime(undefined)).toBeNull();
-    expect(parseCreatime(123)).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// makeSource().listFiles() — 把 creatime 折进 mtime 排序键
+// fake App 构造
 // ---------------------------------------------------------------------------
 interface FakeFile {
   path: string;
   mtime: number;
+  ctime?: number;
   frontmatter?: { creatime?: unknown };
 }
 
@@ -46,7 +18,10 @@ function makeFakeApp(files: FakeFile[]) {
   return {
     vault: {
       getMarkdownFiles: () =>
-        files.map((f) => ({ path: f.path, stat: { mtime: f.mtime } })),
+        files.map((f) => ({
+          path: f.path,
+          stat: { mtime: f.mtime, ctime: f.ctime ?? f.mtime },
+        })),
       getAbstractFileByPath: (p: string) => byPath.get(p) ?? null,
     },
     metadataCache: {
@@ -64,87 +39,54 @@ function makeFakeApp(files: FakeFile[]) {
   };
 }
 
-describe("makeSource.listFiles — creatime 排序键", () => {
-  it("返回 creatime 解析后的毫秒时间戳", () => {
+// ---------------------------------------------------------------------------
+// makeSource().listFiles() — 用文件系统 ctime 作排序键
+// ---------------------------------------------------------------------------
+describe("makeSource.listFiles — ctime 排序键", () => {
+  it("返回文件系统 ctime", () => {
     const app = makeFakeApp([
-      {
-        path: "a.md",
-        mtime: 1,
-        frontmatter: { creatime: "2026-06-17 17:13:25" },
-      },
+      { path: "a.md", mtime: 1, ctime: 100 },
+      { path: "b.md", mtime: 2, ctime: 200 },
     ]);
     const rows = makeSource(app as never).listFiles();
-    expect(rows[0].mtime).toBe(new Date(2026, 5, 17, 17, 13, 25).getTime());
-  });
-
-  it("缺失/无效 creatime 返回 -Infinity(排最后)", () => {
-    const app = makeFakeApp([
-      { path: "no-fm.md", mtime: 1 }, // 无 frontmatter
-      { path: "no-creatime.md", mtime: 1, frontmatter: {} }, // 有 frontmatter 无字段
-      { path: "bad.md", mtime: 1, frontmatter: { creatime: "${now}" } }, // 占位符
+    expect(rows).toEqual([
+      { path: "a.md", mtime: 100 },
+      { path: "b.md", mtime: 200 },
     ]);
-    const rows = makeSource(app as never).listFiles();
-    for (const r of rows) expect(r.mtime).toBe(Number.NEGATIVE_INFINITY);
   });
 });
 
-describe("makeNewFilesSource.listFiles — 透传 creatime", () => {
-  it("有 creatime 返回解析值,缺失返回 null", () => {
+describe("makeNewFilesSource.listFiles — 透传 ctime", () => {
+  it("返回文件系统 ctime", () => {
     const app = makeFakeApp([
-      {
-        path: "a.md",
-        mtime: 1,
-        frontmatter: { creatime: "2026-06-17 17:13:25" },
-      },
-      { path: "no-creatime.md", mtime: 2 },
+      { path: "a.md", mtime: 1, ctime: 100 },
+      { path: "b.md", mtime: 2, ctime: 200 },
     ]);
     const files = makeNewFilesSource(app as never).listFiles();
     expect(files).toEqual([
-      { path: "a.md", creatime: new Date(2026, 5, 17, 17, 13, 25).getTime() },
-      { path: "no-creatime.md", creatime: null },
+      { path: "a.md", ctime: 100 },
+      { path: "b.md", ctime: 200 },
     ]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// collectRows(makeSource(app)) — 端到端:按 creatime 降序,缺失排最后
+// collectRows(makeSource(app)) — 端到端:按 ctime 降序
 // ---------------------------------------------------------------------------
-describe("collectRows 端到端 — 按 creatime 排序", () => {
-  it("creatime 新的在前,缺失的排最后", () => {
+describe("collectRows 端到端 — 按 ctime 排序", () => {
+  it("ctime 新的在前", () => {
     const app = makeFakeApp([
-      { path: "no-creatime.md", mtime: 999 }, // 无 creatime,但 mtime 最大
-      {
-        path: "new.md",
-        mtime: 100,
-        frontmatter: { creatime: "2026-08-01 10:00:00" },
-      },
-      {
-        path: "old.md",
-        mtime: 200,
-        frontmatter: { creatime: "2026-06-01 10:00:00" },
-      },
+      { path: "new.md", mtime: 100, ctime: 300 },
+      { path: "old.md", mtime: 200, ctime: 100 },
     ]);
-    const src = makeSource(app as never);
-    const rows = collectRows(src);
-    expect(rows.map((r) => r.sourcePath)).toEqual([
-      "new.md", // creatime 最新
-      "old.md", // creatime 较早
-      "no-creatime.md", // 缺失 → 最后(即使 mtime 最大)
-    ]);
+    const rows = collectRows(makeSource(app as never));
+    expect(rows.map((r) => r.sourcePath)).toEqual(["new.md", "old.md"]);
   });
 
-  it("同 creatime 保持稳定顺序", () => {
+  it("同 ctime 保持稳定顺序", () => {
     const app = makeFakeApp([
-      {
-        path: "a.md",
-        mtime: 1,
-        frontmatter: { creatime: "2026-07-01 00:00:00" },
-      },
-      {
-        path: "b.md",
-        mtime: 2,
-        frontmatter: { creatime: "2026-07-01 00:00:00" },
-      },
+      { path: "a.md", mtime: 1, ctime: 100 },
+      { path: "b.md", mtime: 2, ctime: 100 },
     ]);
     const rows = collectRows(makeSource(app as never));
     expect(rows.map((r) => r.sourcePath)).toEqual(["a.md", "b.md"]);
